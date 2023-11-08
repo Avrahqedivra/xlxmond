@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html class="__THEME__">
+
+<head>
+	<link rel="icon" type="image/x-icon" href="favicon.ico" />
+	<meta charset="UTF-8">
+	<meta http-equiv="refresh" content="20000"/>
+	<title>XLXMOND</title>
+
+	<link rel="stylesheet" href="theme_template.css">
+	<link rel="stylesheet" href="mysite_template.css">
+	<meta name="description" content="Copyright (c) 2022 Jean-Michel Cohen - F4JDN" />
+
+		<style>
+			.reflectors {
+				width: 50rem;
+			}
+			#xhbtables {
+				margin-top: 0rem;
+				height: calc(100vh - 16rem);
+				overflow-y: scroll;
+				width: fit-content;
+				scrollbar-width: thin;
+			}
+	
+			#xhbtables::-webkit-scrollbar {
+				display: block;
+				width: 6px;
+				background-color: #404040;
+			}
+	
+			#xhbtables::-webkit-scrollbar-thumb {
+				background-color: #569cd6;
+			}
+	
+			@supports (-moz-appearance:none) {
+				xdiv[name="hbtables"] { 
+						overflow-y: scroll;
+						width: fit-content;
+						margin-top: 0.5rem;
+						scrollbar-color: #569cd6 #404040;
+				}
+			}
+		</style>
+	</head>
+
+<body>
+	<center>
+		<noscript>You must enable JavaScript</noscript>
+
+		<div id="sitelogo" style="display:none">__SITE_LOGO__</div>
+
+		__BUTTON_BAR__
+
+		<div id="siteHeader" style="display:none">
+
+			<!-- The Modal -->
+			<div id="statisticsModal" class="modal">
+				<!-- Modal content -->
+				<div class="modal-content-statistics">
+					<span class="close close-statistics">&times;</span>
+					<table class="tablefixed">
+						<thead id="theadStatistics" tbodyid="statistics">
+							<tr class="headerRow">
+								<th class="thlstg">TG</th>
+								<th class="thlsCnx">Nb Cnx</th>
+								<th class="thlsDelay">Total Time</th>
+							</tr>
+						</thead>
+						<tbody id="statistics">
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- The Modal -->
+			<div id="listenersModal" class="modal">
+				<!-- Modal content -->
+				<div class="modal-content-listeners">
+					<span class="close close-listeners">&times;</span>
+					<table class="tablefixed">
+						<thead id="theadListeners" tbodyid="listeners">
+							<tr class="headerRow">
+								<th class="thlscallsign">Callsign</th>
+								<th class="thlsip">IP</th>
+								<th class="thlsport">Port</th>
+								<th class="thlsnetid">NetID</th>
+							</tr>
+						</thead>
+						<tbody id="listeners">
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div name="hbtables" id="hbtables">
+				<div id="insertPoint">
+					<table class="tables tablefixed reflectors" id="reflectors">
+						<thead id="theadReflectors" tbodyid="reflectors">
+							<tr class="headerRow">
+								<th class="thleorder">#</th>
+								<th class="thrfname">Name</th>
+								<!-- <th class="thrflastip">LastIP</th> -->
+								<!-- <th class="thrfurl">Dashboard</th> -->
+								<th class="thrfcountry">Country</th>
+								<th class="thrfuptime">UpTime</th>
+								<th class="thrfcomment">Comment</th>
+							</tr>
+						</thead>
+						<tbody id="reflectorsBody"></tbody>
+					</table>
+				</div>
+			</div>
+
+			<div id="footer">
+				__FOOTER__
+			</div> 
+			<!--THIS COPYRIGHT NOTICE MUST BE DISPLAYED AS A CONDITION OF THE LICENCE GRANT FOR THIS SOFTWARE. ALL DERIVATEIVES WORKS MUST CARRY THIS NOTICE -->
+		</div>
+	</center>
+</body>
+
+<script type="text/javascript">
+	listenerList = [];
+
+	//   https://stackoverflow.com/questions/9229645/remove-duplicate-values-from-js-array
+	function uniqByKeepFirst(a, key) {
+		let seen = new Set();
+		return a.filter(item => {
+			let k = key(item);
+			return seen.has(k) ? false : seen.add(k);
+		});
+	}
+
+	function uniqByKeepLast(a, key) {
+		return [
+			...new Map(
+				a.map(x => [key(x), x])
+			).values()
+		]
+	}
+
+	function scrollIntoViewFromId(id) {
+		if (hideAllTG) {
+			hideAllTG = false;
+			$("#insertPoint").show();
+		};
+
+		const el = document.getElementById(id);
+		if (el != null) {
+			el.scrollIntoView(true);
+			el.focus();
+		}
+	}
+
+
+	function getPercentage(rowCount) {
+		nbtables = $(".tgtable");
+		nbrows = 0;
+		for(let i=0; i < nbtables.length; i++)
+			nbrows += $("#"+$(nbtables[i]).attr("id") + ' >tbody >tr').length;
+		return (rowCount * 100 / nbrows) + 0.5;
+	}
+
+	function doReflectors(t) {
+		if (t != null) {
+			if (Array.isArray(t))
+				reflectors = t;
+			else
+				reflectors = [t];
+
+			let reflectorsLength = reflectors.length;
+
+			if (reflectorsLength > 0) {
+				for(let i=0; i < reflectorsLength; i++) {
+					var record = reflectors[i];
+					var bgClass = "tgWhite";
+					var refColor = (record.uptime == "down") ? "tgRed":"tgGreen";
+					var updown = (record.uptime == "down") ? "down.png":"up.png";
+
+					content = '<tr class=' + bgClass + '>';
+						content += "<td class='tdOrder'>" + (i+1) + "</td>";
+						content += "<td class='tdrfname'><a target='_blank' href=" + record.dashboardurl + ">" + record.name + "</a></td>";
+						// content += "<td class='tdrflastip'>" + record.lastip + "</td>";
+						// content += "<td class='tdrfurl ellipsis'><a target='_blank' href=" + record.dashboardurl + ">" + record.dashboardurl + "</a></td>";
+						content += "<td class='tdrfcountry ellipsis'>" + record.country + "</td>";
+						content += "<td class='tdrfuptime " + refColor + "'><div class='tooltip'><img style='height: 1rem;' src=" + updown + "><span class='tooltiptext'>" + record.uptime + "</span></div></td>";
+						content += "<td class='tdrfcomment ellipsis'>" + record.comment + "</td>";
+					content += "</tr>";
+
+					$("#reflectorsBody").append(content);
+				}
+			}
+		}
+	}
+
+	function log(msg) {
+		console.log(msg);
+	};
+
+	// https://htmldom.dev/drag-to-scroll/
+
+	pos = { top: 0, left: 0, x: 0, y: 0 };
+
+	const mouseMoveHandler = function (e) {
+    // How far the mouse has been moved
+    const dx = e.clientX - pos.x;
+    const dy = e.clientY - pos.y;
+
+    // Scroll the element
+    e.scrollTop = pos.top - dy;
+    e.scrollLeft = pos.left - dx;
+	};
+
+	const mouseUpHandler = function (e) {
+    document.removeEventListener('mousemove', mouseMoveHandler);
+    document.removeEventListener('mouseup', mouseUpHandler);
+
+    // e.style.cursor = 'grab';
+    // e.style.removeProperty('user-select');
+	};
+
+	const mouseDownHandler = function(e) {
+		// Change the cursor and prevent user from selecting the text
+		// e.style.cursor = 'grabbing';
+		// e.style.userSelect = 'none';
+
+		pos = {
+				// The current scroll
+				left: e.scrollLeft,
+				top: e.scrollTop,
+				// Get the current mouse position
+				x: e.clientX,
+				y: e.clientY,
+		};
+
+		document.addEventListener('mousemove', mouseMoveHandler);
+		document.addEventListener('mouseup', mouseUpHandler);
+	};
+
+	$(document).ready(function () {
+		TIME_INTERVALS = 24
+		
+		// document ready occurs before windows.onLoad
+		if (getConfigFromLocalStorage != null) {
+			getConfigFromLocalStorage();
+
+			if (document.documentElement.className != settings[0].config.theme)
+					document.documentElement.className = settings[0].config.theme;
+		}
+
+		document.cookie = "SameSite=None; Secure"
+
+		initMenubar();
+
+		$(window).click(function (event) {
+			if (event.target == document.getElementById("listenersModal"))
+				$("#listenersModal").hide();
+		});
+
+		$(window).click(function (event) {
+			if (event.target == document.getElementById("statisticsModal"))
+				$("#statisticsModal").hide();
+		});
+
+		$(document).on("click", ".network thead", function () {
+			$("#" + $(this).attr('tbodyid')).toggle(100);
+		});
+
+		$(document).on("click", ".close", function () {
+			$("#statisticsModal").hide();
+			$("#listenersModal").hide();
+		});
+
+		$(document).on("dblclick", "#btnlisteners", function (e) {
+			if (e.ctrlKey) {
+				$("#listeners tr").remove();
+				var content = "";
+
+				listenerList = uniqByKeepLast(listenerList, swl => swl.NETID);
+
+				listenerList.forEach(swl => {
+					content += "<tr class='trlisteners'><td>" + swl.CALLSIGN + "</td><td>" + swl.IP + "</td><td>" + swl
+						.PORT + "</td><td>" + swl.NETID + "</td></tr>";
+				});
+
+				$("#listeners").append(content);
+				$("#listenersModal").show();
+			}
+		});
+	});
+
+	window.onload = () => {
+		listeners = 0;
+		reflectors = [];
+		mobileDevice = "__MOBILE__" == "true";
+
+		var wsuri = "ws://" + window.location.hostname + ":__SOCKET_SERVER_PORT__?page=reflectors";
+
+		$("#menubar").show();
+		$("#siteHeader").show();
+		$("#freqstatsdiv").show()
+
+		function WSConnection() {
+			'use strict';
+			this.socket = {};
+		}
+
+		WSConnection.prototype.connect = (url) => {
+			'use strict';
+
+			return new Promise((resolve, reject) => {
+				if ("WebSocket" in window)
+					this.socket = new WebSocket(url);
+				else if ("MozWebSocket" in window)
+					this.socket = new MozWebSocket(url);
+				else {
+					log("Browser does not support WebSocket!");
+					resolve();
+				}
+
+				this.socket.onopen = function () {
+						log("Connected to " + url)
+						// this.send(JSON.stringify({
+						// 		"request": "reflectors"
+						// }));
+						resolve();
+				};
+
+				this.socket.onmessage = (e) => {
+					var data = null;
+
+					try {
+						if (themeSettings == "auto")
+							adjustTheme();
+
+						data = JSON.parse(e.data);
+
+						// console.log("");
+						// console.log(data);
+						// console.log("");
+
+						if (data != null) {
+							if (data.CONFIG) {
+								if (data.CONFIG.BIGEARS)
+									$("#btnlisteners").text(data.BIGEARS);
+
+								if (data.CONFIG.REFLECTORS)
+									doReflectors(data.CONFIG.REFLECTORS);
+							}
+					}
+					} catch (error) {
+						log(error);
+					}
+				};
+
+				socket.onerror = function (error) {
+					console.log('WebSocket error: ' + error);
+					reject(error);
+				};
+
+				socket.onclose = function (e) {
+					log("Connection closed (wasClean = " + e.wasClean + ", code = " + e.code + ", reason = '" + e
+						.reason + "')");
+					this.sock = null;
+				};
+			});
+		};
+
+		WSConnection.prototype.disconnect = () => {
+			'use strict';
+			console.log("Disconnect request from local app layer");
+			this.socket.close();
+		};
+
+
+		setTimeout(() => {
+			socket = new WSConnection().connect(wsuri);
+		}, 250);
+	};
+
+	window.onunload = () => {
+		socket = null;
+	}
+</script>
+
+</html>

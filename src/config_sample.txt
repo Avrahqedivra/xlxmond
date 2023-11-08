@@ -1,0 +1,71 @@
+export const XLXD_IP            = 'YOUR SERVER IP'            // D-STAR
+export const XLXD_PORTJSON      = 10001                       // XLXD JSON reporting socket
+
+export const __localhost__: string              = '0.0.0.0'                                   // 127.0.0.1, 0.0.0.0 
+export const __system_name__: string            = "XLXMOND for XLX"                           // Name of the monitored HBlink system
+export const xlx_server_host: string            = XLXD_IP                                     // XLX server IP
+export const xlx_server_port: number            = XLXD_PORTJSON                               // XLX server reporting socket
+export const __frequency__: number              = 10                                          // Frequency to push ctable updates to web clients
+export const __socketServerPort__: number       = 8003                                        // Websocket server for realtime monitoring
+export const __monitor_webserver_port__: number = 7779                                        // Has to be above 1024 if you're not running as root
+export const __displayLines__: number           = 10                                          // number of lines displayed in index_template
+export const __client_timeout__: number         = 0                                           // Clients are timed out after this many seconds, 0 to disable
+export const __start_tot__: number              = 240                                         // TOT
+
+export const __loginfo__: boolean               = false                                       // more log
+
+// how long the sitelogo should appear for the dashboard page in milliseconds
+export const __bannerDelay__: number            = 0
+
+// ids of module to be excluded, for example "A,B,T"
+export const __mod_filter__ = ""
+// number of modules (A -> Z)
+export const __mod_number__ = 26
+// module names, from A to Z, missing will default to "Reserved"
+export const __mod_names__ = '{ "E":"98/BE-Francophone", "F":"99/TG-20899", "H":"62/TG-20862", "T":"70/Local-XLX", "Y":"71/YSF-France" }'
+// ids of module order on html monitor page, for example "B,T,A,C"
+export const __mod_order__ = "E,F,H,T,Y,A,B,C,D,G,H,I,J,K,L,M,N,O,P,Q,R,S,U,V,W,X,Z"
+// all module not in this list will be excluded. if empty all will be allowed
+export const __mod_allowed__ = ""
+// modules to hilite
+export const __mod_hilite__ = "A"
+// modules colors is a json array string of tgid and hex rgb
+export const __mod_colors__ = '{ "tx":"#fbd379", "ind":"#fefefe", "E":"#569cd6", "F":"#fca33c", "H":"#a3e978", "T":"#bc7ebb", "Y":"#bc7ebb" }'
+// dynamic modules, if not filtred by MOD_FILTER, module will be added dynamicaly to dashboard beside those in MOD_ORDER
+export const __dynamic_mod__ = true
+
+// sets default theme (dark or light)
+export const __theme__: string                  = "light_theme"
+
+// Authorization of access to dashboard as admin
+// use http://mysite:port?admin to log as admin
+export const admin_user__: string               = 'admin'
+
+// Authorization of access to dashboard# as user
+export const __web_auth__: boolean              =  false
+
+// secret salt key for passcode generator
+export const __web_secret_key__: string         = "SECRET_KEY"
+
+// do not log listeners ip maps (useless ?)
+export const __do_ipmap__: boolean              = true
+
+export const __siteLogo__: string               = 'sitelogo.html'
+export const __buttonBar__: string              = 'buttonbar.html'
+export const __footer__: string                 = 'footer.html'
+
+// Files and stuff for loading alias files for mapping numbers to names
+export const __path__: string                   = './'                            // MUST END IN '/'
+export const __log_path__: string               = './log/'                        // MUST END IN '/'
+
+export const __file_reload__: number            = 7                               // Number of days before we reload RAdioID database files
+
+export const __reflectors_url__: string = "http://xlxapi.rlx.lu/api.php?do=GetReflectorList"
+export const __reflectors_file__: string = "reflectorlist.xml"
+
+export const __subscriber_url__: string         = 'https://database.radioid.net/static/users.json'
+export const __subscriber_file__: string        = 'subscriber_ids.json'           // Will auto-download from DMR-MARC
+
+// Settings for xlxd log files
+export const __xlxdlog_file__    = '/var/log/xlxd.xml'
+// export const __xlxdlog_file__      = './log/xlxd.xml'

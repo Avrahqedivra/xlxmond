@@ -1,0 +1,26 @@
+{
+  "name": "monitor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "monitor.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "F4JDN - Jean-Michel Cohen",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.4.8",
+    "@types/websocket": "^1.0.5",
+    "@types/ws": "^8.5.5",
+    "@types/xml2js": "^0.4.13"
+  },
+  "dependencies": {
+    "permessage-deflate": "^0.1.7",
+    "typescript": "^5.1.6",
+    "ws": "^8.13.0",
+    "xml2js": "^0.6.2"
+  }
+}

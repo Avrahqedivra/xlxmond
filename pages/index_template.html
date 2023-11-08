@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html class="__THEME__">
+
+<head>
+	<link rel="icon" type="image/x-icon" href="favicon.ico" />
+	<meta charset="UTF-8">
+	<meta http-equiv="refresh" content="20000"/>
+	<title>XLXMOND</title>
+
+	<link rel="stylesheet" href="theme_template.css">
+	<link rel="stylesheet" href="mysite_template.css">
+	<meta name="description" content="Copyright (c) 2022 Jean-Michel Cohen - F4JDN" />
+
+		<style>
+			#insertPoint {
+				display: inline-block;
+			}
+			.tdleviapeer {
+				text-align: left;
+				padding-left: 0.5rem;
+			}
+			#insertModules {
+				top: 0;
+				padding-left: 1rem;
+				display: inline-block;
+				vertical-align: top;
+			}
+		</style>
+</head>
+
+<body>
+	<center>
+		<noscript>You must enable JavaScript</noscript>
+
+		<div id="sitelogo" style="display:none">__SITE_LOGO__</div>
+
+		__BUTTON_BAR__
+
+		<div id="siteHeader" style="display:none">
+			<div name="hbtables" id="hbtables">
+				<div id="insertPoint"></div><div id="insertModules"></div>
+			</div>
+			<div id="footer">
+				__FOOTER__
+			</div> 
+			<!--THIS COPYRIGHT NOTICE MUST BE DISPLAYED AS A CONDITION OF THE LICENCE GRANT FOR THIS SOFTWARE. ALL DERIVATEIVES WORKS MUST CARRY THIS NOTICE -->
+		</div>
+	</center>
+</body>
+
+<script type="text/javascript">
+	var sock = null;
+	var displayLines = parseInt("__DISPLAY_LINES__");
+	
+	hideAllMod = false;
+	traffic = [];
+	modfilter = new Set("__MOD_FILTER__".split(','));
+	modorder = new Set("__MOD_ORDER__".split(','));
+	modhilite = new Set("__MOD_HILITE__".split(','));
+	dynamic_mod = ("__DYNAMIC_MOD__" == "true") ? true : false;
+	moduleNumber = "__MOD_NUMBER__";
+	moduleNames = JSON.parse('__MOD_NAMES__');
+
+	//  https://stackoverflow.com/questions/9229645/remove-duplicate-values-from-js-array
+	// 	traffic = uniqByKeepLast(traffic, rec => rec.CALLSIGN);
+
+	function keepLastRecordForEachModule(t) {
+		let seen = new Set()
+
+		return t.filter(item => {
+			let k = item.Callsign+item.OnModule
+			return seen.has(k) ? false : seen.add(k);
+		})
+	}
+
+	function uniqByKeepFirst(a, key) {
+		let seen = new Set();
+		return a.filter(item => {
+			let k = key(item).trim;
+			return seen.has(k) ? false : seen.add(k);
+		})
+	}
+
+	function uniqByKeepLast(a, key) {
+		return [
+			...new Map(
+				a.map(x => [key(x), x])
+			).values()
+		]
+	}
+
+	function padTo2Digits(num) {
+  	return num.toString().padStart(2, '0');
+	}
+
+	function getModuleFancyName(letter) {
+		if (moduleNames[letter] == undefined)
+			return "Reserved";
+
+		return moduleNames[letter];
+	}
+
+	function setCurrentTicker(module) {
+		for(let i=0; i<tickerModule.length; i++) {
+			if (tickerModule[i].module == module) {
+				var elements = document.getElementsByClassName("ticker" + tickerModule[i].module)
+				if (elements != null && elements.length > 0) {
+					var value = new Date(tickerModule[i].delay * 1000).toISOString().slice(14, 19)
+					for(let j=0; j<elements.length; j++) {
+						elements[j].innerHTML = value
+					}
+				}
+
+				break
+			}
+		}
+	}
+
+	function doTraffic(data) {
+		if (data != null) {
+			var bgClass = 'tgWhite';
+
+			if (data["HeardUsers"] != null && data["HeardUsers"]["Station"] != null) {
+				if (reflector == "" &&  data["HeardUsers"]["Reflector"] != null)
+					reflector = data["HeardUsers"]["Reflector"];
+
+				if (!Array.isArray(data["HeardUsers"]["Station"]))
+					data["HeardUsers"]["Station"] = [data["HeardUsers"]["Station"]];
+
+				traffic = keepLastRecordForEachModule(data["HeardUsers"]["Station"])
+			}
+
+			if (version == "" &&  data["Version"] != null) {
+				version = data["Version"];
+				if (el = document.getElementById("infoLine"))
+					el.textContent = reflector + " v" + version + " - Dashboard v1.1.0";
+			}
+
+			let trafficLength = traffic.length;
+
+			if (trafficLength > 0) {
+				var modarray = [];
+
+				cleaned = true;
+
+				for (let i = 0; i < trafficLength; i++) {
+					var record = traffic[i];
+					var moduleNode = record.OnModule;
+
+					// skip excluded modules
+					if (modfilter.has(moduleNode))
+						continue;
+
+					// add dynamic allowed modules
+					if ([...modorder][0] != "" && !modorder.has(moduleNode)) {
+						if (dynamic_mod === false)
+							continue;
+
+						modorder.add(moduleNode);
+					}
+
+					if (modarray[moduleNode] == null) {
+						modarray[moduleNode] = "";
+						$("#xlxd" + moduleNode + " tr").remove();
+					}
+					
+					var date = new Date(Date.parse(record["LastHeardTime"]));
+					record["DATE"] = date.getFullYear() +'-'+ padTo2Digits(date.getMonth()+1) + '-' + padTo2Digits(date.getDate())
+					record["TIME"] = padTo2Digits(date.getHours())+":"+padTo2Digits(date.getMinutes())+":"+padTo2Digits(date.getSeconds())
+
+					var callsign = record.Callsign.trim();
+					var viaNode = record.ViaNode;
+					var viaPeer = record.ViaPeer;
+					var suffix = "";
+					var date = "";
+					var delay = 0;
+
+					if (record.Packet === "END") {
+						for(let r=0; r<tickerModule.length; r++) {
+							if (tickerModule[r].module == moduleNode) {
+								delay = tickerModule[r].delay
+
+								if (delay < 2)
+									delay = "PTT"
+								break;
+							}
+						}
+						
+						if (delay == 0)
+							delay = 'N/A'
+
+						record["Delay"] = delay
+					}
+
+					// check dead
+					if (record.Packet === "START") {
+						delay = 0
+						record["Delay"] = delay
+
+						// var tt = new Date(record.DATE + " " + record.TIME);
+						// // if START gone past TOT change to end
+						// if ((Date.now() - tt.getTime()) / 1000 > startTot) {
+						// 		record.Packet = "END";
+						// 		record.Delay = startTot;
+						// }
+					}
+
+					// console.log("xxxx '" + callsign + "' '" + data["onair"] + "'")
+
+					var index = callsign.indexOf("/");
+					if (index != -1) {
+							suffix = callsign.substr(index+1).trim();
+							callsign = callsign.substr(0, index).trim();
+					}
+
+					var flagUrl = getFlag(callsign);
+					if (flagUrl == "")
+						flagUrl = "shield.png";
+
+					var ViaPeer = "";
+					if (viaNode != "")
+						ViaPeer = viaNode;
+					
+					if (viaPeer != "")
+						ViaPeer += (" / " + viaPeer);
+
+					var modName = "modId" + moduleNode;
+
+					if (modhilite.has(moduleNode))
+						bgClass = 'tgWhite';
+					else
+						bgClass = 'tgGreen';
+
+					/* check if table already exists */
+					if (document.getElementById(modName) == null) {
+						var emptyTable = "";
+
+						emptyTable = '<table id=tb' + modName + ' class="tgtable tables network tablefixed">' +
+							'<thead id="' + modName + '" modid="' + moduleNode + '" tbodyid=xlxd' + moduleNode + '">' +
+								'<tr class="headerRow">' +
+								'<th class="thleorder">#</th>' +
+								'<th class="thledate">Date</th>' +
+								'<th class="thletime" id="heure">Time</th>' +
+								'<th class="thlename">Callsign</th>' +
+								'<th class="thlesuffix">Suffix</th>' +
+								'<th class="thleear">Mod</th>' +
+								'<th class="thledprs">DPRS</th>' +
+								'<th class="thledelay">TX (s)</th>' +
+								'<th class="thleviapeer">Via / Peer</th>' +
+								'</tr>' +
+							'</thead>' +
+							'<tbody id="xlxd' + moduleNode + '"></tbody></table>';
+
+						/* insert new table into mod tables area regarding modorder */
+						if (document.getElementById("mod" + moduleNode + "marker") != null)
+							$(emptyTable).insertBefore("#mod" + moduleNode + "marker");
+						else
+							$('#insertPoint').append(emptyTable);
+					}
+
+					var rows = (modarray[moduleNode].match(/\<tr/g) || []).length;
+
+					if (rows < displayLines) {
+					//if (document.getElementById("xlxd"+moduleNode).rows.length < displayLines) {
+						content = '<tr class=' + bgClass + '>';
+							
+						if (record.Packet === "START")
+							content += "<td class=''><img style='height:13px;margin: 0.25rem 0.5rem 0' src='tx.gif'/></td>";
+						else
+							content += "<td class='tdOrder'>" + (i+1) + "</td>";
+
+						content += "<td class='date'>" + record.DATE + "</td>";
+						content += "<td class='time'>" + record.TIME + "</td>";
+						content += "<td class='callsign ellipsis'><img class='modflag' src='" + flagUrl + "'/><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsign + "</a></td>";
+						content += "<td class='tdlesuffix'>" + suffix + "</td>";
+						content += "<td moduleNode=" + moduleNode + " class='ear'>" + moduleNode + "</td>";
+						content += "<td class='dprs'><a target='_blank' href=http://www.aprs.fi/" + callsign + "><img src='" + flag64["sat"] + "'/></a></td>";
+
+						if (record.Packet === "START") {
+							addTicker(record);
+							content += "<td class='online'><div class='ticker" + record.OnModule + "'>00:00</div></td>";
+						} else {
+							if (record.Packet === "END") {
+								deleteTicker(record);
+								content += "<td class='delay'>" + ((delay != undefined) ? delay : "") + "</td>";
+							}
+							else
+								content += "<td class='online'><div class='ticker" + record.OnModule + "'></div></td>";
+						}
+
+						content += "<td class='tdleviapeer'>" + ViaPeer + "</td>";
+						content += "</tr>";
+
+						modarray[moduleNode] += content;
+					}
+				}
+
+				Object.keys(modarray).forEach(moduleNode => {
+					$("#xlxd" + moduleNode).append(modarray[moduleNode]);
+				});
+			}
+
+			if (data["LinkedNodes"] != null && data["LinkedNodes"]["Nodes"] != null)
+				nodes = data["LinkedNodes"]["Nodes"];
+
+			if (nodes) {
+				if (!Array.isArray(nodes))
+					nodes = [nodes];
+
+				let nodesLength = nodes.length;
+
+				if (nodesLength > 0) {
+					cleaned = true;
+					nodes.sort((a, b) => {
+						x = a.LinkedModule;
+						y = b.LinkedModule;
+
+						return x < y ? -1 : x > y ? 1 : 0;
+					});
+
+					$("#tbmodules").remove();
+
+					var modules = [];
+					var biggest = 0;
+
+					var emptyTable = "<table id='tbmodules' class='tgtable tables network tablefixed'><thead><tr class='headerRow'>";
+					for (let i = 0; i < nodesLength; i++) {
+						var record = nodes[i];
+
+						// skip excluded modules
+						if (modfilter.has(record.LinkedModule))
+							continue;
+
+						if (modules[record.LinkedModule] == null) {
+							modules[record.LinkedModule] = [];
+							emptyTable += "<th class='thlename'>" + getModuleFancyName(record.LinkedModule) + "<br>" +  record.LinkedModule + "</th>";
+						}
+							
+						modules[record.LinkedModule].push({ callsign: record.Callsign.trim() });
+						biggest = Math.max(biggest, modules[record.LinkedModule].length);
+					}
+
+					emptyTable += "</tr></thead><tbody id='bodymodules'></tbody></table>";
+
+					$('#insertModules').append(emptyTable);
+
+					emptyTable = "";
+					for(let i=0; i < biggest; i++) {
+						emptyTable = "<tr class=" + bgClass + ">";
+						Object.keys(modules).forEach(key => {
+							var suffix = "";
+							var flagUrl = "";
+							var callsignex = "";
+
+							if ((callsign = modules[key][i]) == null)
+								callsign = "";
+							else {
+								callsign = modules[key][i].callsign;
+							
+								var index = callsign.indexOf(" ");
+								if (index != -1) {
+									suffix = callsign.substr(index+1).trim();
+									callsign = callsign.substr(0, index).trim();
+								}
+
+								flagUrl = getFlag(callsign);
+								if (flagUrl == "")
+									flagUrl = "shield.png";
+
+								if (suffix != "")
+									callsignex = callsign + "-" + suffix;
+								else
+									callsignex = callsign;
+							}
+
+							if (flagUrl != "")
+								emptyTable += "<td class='callsign ellipsis'><img class='modflag' src='" + flagUrl + "'/><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsignex + "</a></td>";
+							else
+								emptyTable += "<td class='callsign ellipsis'><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsignex + "</a></td>";
+						});
+						emptyTable += "</tr>";
+						$("#bodymodules").append(emptyTable);
+					}
+				}
+			}
+		}
+	}
+
+	function updateTime() {
+		if (document.getElementById("heure")) {
+			var now = new Date();
+			var hours = now.getHours();
+			var minutes = now.getMinutes();
+			var seconds = now.getSeconds();
+			
+			// Pad single digits with leading zeros
+			hours = (hours < 10 ? "0" : "") + hours;
+			minutes = (minutes < 10 ? "0" : "") + minutes;
+			seconds = (seconds < 10 ? "0" : "") + seconds;
+			
+			var timeString = hours + ":" + minutes + ":" + seconds;
+			
+			document.getElementById("heure").textContent = timeString;
+		}
+	}
+
+	function checkDeadTicker() {
+		if (ticker != null) {
+			for(let i=tickerModule.length-1; i >= 0; i--) {
+				if (tickerModule[i].delay > startTot) {
+					// console.log("deleting dead ticker for module " + tickerModule[i].module);
+					tickerModule.splice(i, 1);
+				}
+			}
+		}
+	}
+
+	function deleteTicker(record) {
+		if (ticker != null) {
+			for(let i=0; i<tickerModule.length; i++) {
+				if (tickerModule[i].module == record.OnModule) {
+					console.log("deleting ticker for module " + record.OnModule);
+					tickerModule.splice(i, 1);
+					break;
+				}
+			}
+		}
+	}
+
+	function addTicker(record) {
+		if (ticker != null) {
+			console.log("adding ticker for module " + record.OnModule);
+
+			for(let i=0; i<tickerModule.length; i++) {
+				if (tickerModule[i].module == record.OnModule)
+					return;
+			}
+
+			tickerModule.push({ "module": record.OnModule, "start": Date.now(), "delay": 0 });
+		}
+	}
+
+	function log(msg) {
+		console.log(msg);
+	}
+
+	$(document).ready(function () {
+		TIME_INTERVALS = 24
+		
+		// document ready occurs before windows.onLoad
+		if (getConfigFromLocalStorage != null) {
+			getConfigFromLocalStorage();
+
+			if (document.documentElement.className != settings[0].config.theme)
+					document.documentElement.className = settings[0].config.theme;
+		}
+
+		document.cookie = "SameSite=None; Secure"
+
+		initMenubar();
+	})
+
+	window.onload = () => {
+		doApplyConfig = true;
+		reflector = "";
+		version = "";
+		listeners = 0;
+		urlCache = {}
+		startTot = parseInt("__START_TOT__"); if (startTot == 0) startTot = 240;
+		bannerDelay = parseInt("__BANNER_DELAY__");
+		mobileDevice = "__MOBILE__" == "true";
+
+		ticker = null;
+		tickerModule = [];
+		statusCountdown = 0
+
+		var wsuri = "ws://" + window.location.hostname + ":__SOCKET_SERVER_PORT__?page=dashboard";
+
+		if (isNaN(displayLines))
+			displayLines = 10;
+
+		document.getElementById("menuSearch").style.display = "inline-block";	
+
+		// don't show banner if already done within 3600s
+		if (true || bannerDelay == 0 || (Math.floor(Date.now() - settings[0].config.last) / 1000) < 3600) {
+			$("#menubar").show();
+			$("#siteHeader").show();
+			$("#freqstatsdiv").show()
+		}
+		else 
+		{
+			$("#sitelogo").show();
+
+			setTimeout(() => {
+				$("#sitelogo").hide()
+				$("#menubar").show()
+				$("#siteHeader").show()
+				$("#freqstatsdiv").show()
+
+				// reset settings timer 
+				saveSettings();
+			}, bannerDelay);
+		}
+
+		modorder.forEach(moduleNode => {
+			$("#insertPoint").append($("<div id='mod" + moduleNode + "marker'></div>"));
+		});
+
+		if (hideAllMod)
+			$("#insertPoint").hide();
+		else
+			$("#insertPoint").show();
+
+		function WSConnection() {
+			'use strict';
+			this.socket = {};
+		}
+
+		WSConnection.prototype.connect = (url) => {
+			'use strict';
+
+			return new Promise((resolve, reject) => {
+				if ("WebSocket" in window)
+					this.socket = new WebSocket(url);
+				else if ("MozWebSocket" in window)
+					this.socket = new MozWebSocket(url);
+				else {
+					log("Browser does not support WebSocket!");
+					resolve();
+				}
+
+				this.socket.onopen = () => {
+					log("Connected to " + url)
+
+					ticker = setInterval(() => {
+						// Update the time every second
+						updateTime();
+
+						for(let i=0; i<tickerModule.length; i++) {
+							tickerModule[i].delay++
+
+							var elements = document.getElementsByClassName("ticker" + tickerModule[i].module)
+							if (elements != null && elements.length > 0) {
+								var value = new Date(tickerModule[i].delay * 1000).toISOString().slice(14, 19)
+								for(let j=0; j<elements.length; j++) {
+									elements[j].innerHTML = value
+									break
+								}
+							}
+						}
+					}, 1000)
+
+					resolve()
+				}
+
+				this.socket.onmessage = (e) => {
+					var data = null;
+
+					try {
+						if (themeSettings == "auto")
+							adjustTheme();
+
+						data = JSON.parse(e.data);
+
+						if (data != null) {
+							if (data.BIGEARS)
+								$("#btnlisteners").text(data.BIGEARS)
+
+							// FIRST PACKET IS CONFIG
+							if (data.CONFIG) {
+								if (data.CONFIG.BIGEARS)
+									$("#btnlisteners").text(data.BIGEARS);
+
+								if (data.CONFIG.PACKETS)
+									doTraffic(data.CONFIG.PACKETS.TRAFFIC);
+							} else {
+								if (data.TRAFFIC)
+									doTraffic(data.TRAFFIC);
+
+								if (data.STATUS)
+									log(data.STATUS);
+							}
+
+							if (themeSettings == "auto")
+								adjustTheme();
+
+							if (doApplyConfig) {
+								doApplyConfig = false;
+								applyConfig();
+							}
+					}
+					} catch (error) {
+						log(error);
+					}
+				}
+
+				socket.onerror = function (error) {
+					console.log('WebSocket error: ' + error);
+					reject(error);
+				};
+
+				socket.onclose = function (e) {
+					log("Connection closed (wasClean = " + e.wasClean + ", code = " + e.code + ", reason = '" + e.reason + "')");
+					this.sock = null;
+				};
+			});
+		};
+
+		WSConnection.prototype.disconnect = () => {
+			'use strict';
+			console.log("Disconnect request from local app layer");
+			this.socket.close();
+		};
+
+
+		setTimeout(() => {
+			socket = new WSConnection().connect(wsuri);
+		}, 250);
+	};
+
+	window.onunload = () => {
+		socket = null;
+		if (ticker != null) {
+			clearInterval(ticker);
+			ticker = null;
+		}
+	}
+</script>
+
+</html>
