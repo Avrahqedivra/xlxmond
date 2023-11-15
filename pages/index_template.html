@@ -66,9 +66,18 @@
 
 	function keepLastRecordForEachModule(t) {
 		let seen = new Set()
+		var callsign = ''
+		var suffix = ''
 
 		return t.filter(item => {
-			let k = item.Callsign+item.OnModule
+			callsign = item.Callsign.trim()
+			var index = callsign.indexOf("/");
+			if (index != -1) {
+					suffix = callsign.substring(index+1).trim();
+					callsign = callsign.substring(0, index).trim();
+			}
+
+			let k = callsign+item.OnModule
 			return seen.has(k) ? false : seen.add(k);
 		})
 	}
@@ -169,6 +178,13 @@
 					record["TIME"] = padTo2Digits(date.getHours())+":"+padTo2Digits(date.getMinutes())+":"+padTo2Digits(date.getSeconds())
 
 					var callsign = record.Callsign.trim();
+
+					var index = callsign.indexOf("/");
+					if (index != -1) {
+							suffix = callsign.substring(index+1).trim();
+							callsign = callsign.substring(0, index).trim();
+					}
+
 					var viaNode = record.ViaNode;
 					var viaPeer = record.ViaPeer;
 					var suffix = "";
@@ -206,12 +222,6 @@
 					}
 
 					// console.log("xxxx '" + callsign + "' '" + data["onair"] + "'")
-
-					var index = callsign.indexOf("/");
-					if (index != -1) {
-							suffix = callsign.substr(index+1).trim();
-							callsign = callsign.substr(0, index).trim();
-					}
 
 					var flagUrl = getFlag(callsign);
 					if (flagUrl == "")
@@ -359,8 +369,8 @@
 							
 								var index = callsign.indexOf(" ");
 								if (index != -1) {
-									suffix = callsign.substr(index+1).trim();
-									callsign = callsign.substr(0, index).trim();
+									suffix = callsign.substring(index+1).trim();
+									callsign = callsign.substring(0, index).trim();
 								}
 
 								flagUrl = getFlag(callsign);
