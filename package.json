@@ -20,7 +20,7 @@
   "dependencies": {
     "permessage-deflate": "^0.1.7",
     "typescript": "^5.1.6",
-    "ws": "^8.13.0",
+    "ws": "^8.17.0",
     "xml2js": "^0.6.2"
   }
 }

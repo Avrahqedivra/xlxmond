@@ -17,7 +17,7 @@
  *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  *  THE SOFTWARE.
  *
- *  Copyright(c) 2023 F4JDN - Jean-Michel Cohen
+ *  Copyright(c) 2023-25 F4JDN - Jean-Michel Cohen
  *  
 */
 
@@ -255,7 +255,7 @@ export class Monitor {
         /**
          * authenticated, add to session and continue
          */
-        let requestip = '::1' ? '127.0.0.1':req.socket.remoteAddress.replace(/^.*:/, '')
+        let requestip = req.socket.remoteAddress.startsWith('::1') ? '127.0.0.1' : req.socket.remoteAddress.replace(/^.*:/, '')
         if (!sessionmgr.sessions.hasOwnProperty(requestip)) {
           // logger.info(`adding ipaddress to session ${requestip}`)
           sessionmgr.sessions[requestip] = new sessionmgr.Session(requestip, 0)
@@ -588,7 +588,7 @@ export class Monitor {
                                                                
     logger.info(`${globals.__RESET__}`)
     
-    logger.info(`\nNDMonitor v${__version__} (c) 2023 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>`)
+    logger.info(`\nNDMonitor v${__version__} (c) 2023-25 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>`)
 
     // must be first
     __footer_html__ = replaceSystemStrings(loadTemplate(`${config.__path__}pages/${config.__footer__}`))        
@@ -649,7 +649,7 @@ export class Monitor {
         ws.connectTime = Date.now()
 
         // get ip address
-        let requestip = '::1' ? '127.0.0.1':req.socket.remoteAddress.replace(/^.*:/, '')
+        let requestip = req.socket.remoteAddress.startsWith('::1') ? '127.0.0.1' : req.socket.remoteAddress.replace(/^.*:/, '')
 
         logger.info(`\nWebSocket connection from page ${ws.page}`)
   
@@ -677,7 +677,7 @@ export class Monitor {
         })
 
         ws.on('close', () => {
-          let requestip = '::1' ? '127.0.0.1':req.socket.remoteAddress.replace(/^.*:/, '')
+          let requestip = req.socket.remoteAddress.startsWith('::1') ? '127.0.0.1' : req.socket.remoteAddress.replace(/^.*:/, '')
           if (config.__web_auth__ && sessionmgr.sessions.hasOwnProperty(requestip))
             delete sessionmgr.sessions[requestip]
         })
