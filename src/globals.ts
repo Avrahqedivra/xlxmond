@@ -17,7 +17,7 @@
  *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  *  THE SOFTWARE.
  *
- *  Copyright(c) 2023 F4JDN - Jean-Michel Cohen
+ *  Copyright(c) 2023-25 F4JDN - Jean-Michel Cohen
  *  
 */
 
