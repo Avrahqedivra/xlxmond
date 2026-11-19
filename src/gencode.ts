@@ -17,16 +17,22 @@
  *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  *  THE SOFTWARE.
  *
- *  Copyright(c) 2023-25 F4JDN - Jean-Michel Cohen
+ *  Copyright(c) 2023-26 F4JDN - Jean-Michel Cohen
  *  
 */
 
 import { Crc16 } from './crc16.js'
 import * as config from './config.js'
+import { __version__ } from './monitor.js'
 import { abort } from 'process'
 
+/** Shared CRC16 helper, same instance the monitor uses for auth. */
 export let crc16: Crc16 = new Crc16()
 
+/**
+ * Small CLI wrapper that turns a callsign into the passcode the monitor
+ * expects in HTTP Basic auth (`password = crc16(username, secret)`).
+ */
 class GenCode {
   private callsign: string = ''
   private options: string = ''
@@ -57,9 +63,10 @@ class GenCode {
   }
 
   usage(): void {
-    console.log("\nusage: node ./dist/gencode.js [-c] callsign\n\toptional -c will uppercase the callsign\n\toptional -m will lowercase the callsign\n")
+    console.log("\nusage: node ./dist/gencode.js [-c|-m|-u|-l] callsign\n\toptional -c / -u will uppercase the callsign\n\toptional -m / -l will lowercase the callsign\n")
   }
 
+  /** Return the [normalised callsign, passcode] pair. */
   compute(): [ string, string ] {
     let code = crc16.compute(this.callsign, config.__web_secret_key__).toString()
     return [ this.callsign, code ]
@@ -70,9 +77,9 @@ try {
   let gencode = new GenCode(process.argv.slice(2))
 
   let [ callsign, code ] = gencode.compute()
-  console.log("\nLogin/Passcode generator for NDMonitor v1.7.0\nCopyright (c) 2023 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>\n")
+  console.log(`\nLogin/Passcode generator for XLXMOND v${__version__}\nCopyright (c) 2023-26 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>\n`)
   console.log(callsign + " passcode is " + code + "\n")
 } 
 catch(e) {
-
 }
+

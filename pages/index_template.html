@@ -627,14 +627,6 @@
 			socket = new WSConnection().connect(wsuri);
 		}, 250);
 	};
-
-	window.onunload = () => {
-		socket = null;
-		if (ticker != null) {
-			clearInterval(ticker);
-			ticker = null;
-		}
-	}
 </script>
 
 </html>

@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Monitor (ts-node ESM)",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": [
+        "--loader",
+        "ts-node/esm"
+      ],
+      "program": "${workspaceFolder}/src/monitor.ts",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--no-warnings"
+      }
+    }
+  ]
+}

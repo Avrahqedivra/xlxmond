@@ -55,7 +55,7 @@ export class FileDownloader {
         }
 
         if (fs.existsSync(filename) && (Date.now() - fs.statSync(filename).mtime.getTime()) / 1000 < stale) {
-            logger.info(`${file} is current, not downloaded\n`)
+            logger?.info(`${file} is current, not downloaded\n`)
             resolve()
         }
         else {
@@ -76,17 +76,17 @@ export class FileDownloader {
               // if downloaded file size is zero, delete temp file
               if (fs.statSync(tempfilename).size == 0) {
                 fs.unlinkSync(tempfilename)
-                logger.info(`${filename} downloaded with size 0 ${globals.__WARNING__}`)
+                logger?.info(`${filename} downloaded with size 0 ${globals.__WARNING__}`)
               }
               else {
                 // if downloaded file looks ok, delete old .json, rename temp file
                 if (fs.existsSync(filename))
                   fs.unlinkSync(filename)
                 fs.renameSync(tempfilename, filename)
-                logger.info(`${filename} downloaded ${globals.__OK__}`)
+                logger?.info(`${filename} downloaded ${globals.__OK__}`)
               }
 
-              logger.info('File downloaded and saved.\n')  
+              logger?.info('File downloaded and saved.\n')  
 
               resolve()
             })
@@ -100,7 +100,7 @@ export class FileDownloader {
             if (fs.existsSync(tempfilename))
               fs.unlinkSync(tempfilename)
 
-            logger.info(`downloading the file: ${filename} ${globals.__FAILED__} with ${error}` )
+            logger?.info(`downloading the file: ${filename} ${globals.__FAILED__} with ${error}` )
             reject(error)
           })
         }
