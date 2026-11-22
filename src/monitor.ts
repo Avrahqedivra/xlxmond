@@ -25,7 +25,7 @@
 // Imports
 // ─────────────────────────────────────────────────────────────────────────────
 
-import fs from "fs"
+import fs, { readFileSync } from "fs"
 import path from "path"
 import crypto from "crypto"
 import { TextDecoder } from "util"
@@ -695,6 +695,10 @@ export class Monitor {
     return js
   }
 
+  getModules() {
+    return JSON.parse(fs.readFileSync(`${config.__path__}assets/modules.json`, { encoding: "utf8", flag: "r" }))
+  }
+
   // ── HTTP server ────────────────────────────────────────────────────────────
 
   /**
@@ -759,6 +763,7 @@ export class Monitor {
           ),
         )
 
+      case "/modules.html":
       case "/reflectors.html":
       case "/peers.html":
         return sendResponse(
@@ -1018,21 +1023,23 @@ export class Monitor {
       }, 500),
     )
 
-    this.startTimers.push(
-      setTimeout(() => {
-        logger!.info("initializing keep alive")
+    if (config.__keep_alive__) {
+      this.startTimers.push(
+        setTimeout(() => {
+          logger!.info("initializing keep alive")
 
-        this.ticker = setInterval(() => {
-          if (Date.now() - this.lastRx > SERVER_SILENCE_TIMEOUT_MS) {
-            logger!.error("no data from server, reconnecting")
-            this.scheduleReconnect()
-            return
-          }
+          this.ticker = setInterval(() => {
+            if (Date.now() - this.lastRx > SERVER_SILENCE_TIMEOUT_MS) {
+              logger!.error("no data from server, reconnecting")
+              this.scheduleReconnect()
+              return
+            }
 
-          this.send(Buffer.from("ping"))
-        }, KEEPALIVE_INTERVAL_MS)
-      }, KEEPALIVE_FIRST_DELAY_MS),
-    )
+            this.send(Buffer.from("ping"))
+          }, KEEPALIVE_INTERVAL_MS)
+        }, KEEPALIVE_FIRST_DELAY_MS),
+      )
+    }
   }
 
   private maskIp(ip: String) {
@@ -1327,6 +1334,9 @@ export class Monitor {
 
         if (ws.page === "reflectors")
           _message["REFLECTORS"] = this.getReflectors()
+
+        if (ws.page === "modules")
+          _message["MODULES"] = this.getModules()
 
         ws.on("error", console.error)
 

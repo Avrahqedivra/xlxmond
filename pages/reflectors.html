@@ -96,7 +96,7 @@
 			<div name="hbtables" id="hbtables">
 				<div id="insertPoint">
 					<table class="tables tablefixed reflectors" id="reflectors">
-						<thead id="theadReflectors" tbodyid="reflectors">
+						<thead id="theadReflectors" tbodyid="reflectorsBody">
 							<tr class="headerRow">
 								<th class="thleorder">#</th>
 								<th class="thrfname">Name</th>
@@ -122,45 +122,6 @@
 
 <script type="text/javascript">
 	listenerList = [];
-
-	//   https://stackoverflow.com/questions/9229645/remove-duplicate-values-from-js-array
-	function uniqByKeepFirst(a, key) {
-		let seen = new Set();
-		return a.filter(item => {
-			let k = key(item);
-			return seen.has(k) ? false : seen.add(k);
-		});
-	}
-
-	function uniqByKeepLast(a, key) {
-		return [
-			...new Map(
-				a.map(x => [key(x), x])
-			).values()
-		]
-	}
-
-	function scrollIntoViewFromId(id) {
-		if (hideAllTG) {
-			hideAllTG = false;
-			$("#insertPoint").show();
-		};
-
-		const el = document.getElementById(id);
-		if (el != null) {
-			el.scrollIntoView(true);
-			el.focus();
-		}
-	}
-
-
-	function getPercentage(rowCount) {
-		nbtables = $(".tgtable");
-		nbrows = 0;
-		for(let i=0; i < nbtables.length; i++)
-			nbrows += $("#"+$(nbtables[i]).attr("id") + ' >tbody >tr').length;
-		return (rowCount * 100 / nbrows) + 0.5;
-	}
 
 	function doReflectors(t) {
 		if (t != null) {

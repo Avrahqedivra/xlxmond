@@ -1283,6 +1283,7 @@ select {
   --color-tooltip-fg: #000000;
 
   /* dropdown */
+  --invert_bitmap_mode: 1;
   --color-dropdown-hover: #525252;
   --color-dropdown-btn: #356244;
   --color-dropdown-content: #f1f1f1;
@@ -1446,6 +1447,7 @@ select {
   --color-tooltip-fg: #ffffff;
 
   /* dropdown */
+  --invert_bitmap_mode: 0;
   --color-dropdown-hover: #525252;
   --color-dropdown-btn: #356244;
   --color-dropdown-content: #a1a1a1;
@@ -1663,3 +1665,6 @@ canvas {
   font-size: 1.4rem;
 }
 
+.menu_bitmap {
+  filter: invert(var(--invert_bitmap_mode));
+}
