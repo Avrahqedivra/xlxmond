@@ -21,9 +21,14 @@
  *
  */
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Imports
+// ─────────────────────────────────────────────────────────────────────────────
+
 import fs from "fs"
 import path from "path"
 import crypto from "crypto"
+import { TextDecoder } from "util"
 
 import { WebSocketServer } from "ws"
 import udp from "node:dgram"
@@ -41,7 +46,11 @@ import * as config from "./config.js"
 import * as globals from "./globals.js"
 import * as sessionmgr from "./session.js"
 
-export let __version__: string = "2.0.0"
+// ─────────────────────────────────────────────────────────────────────────────
+// Exported state (public API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export let __version__: string = "2.1.0"
 export let __siteLogo_html__: any = ""
 export let __buttonBar_html__: any = ""
 export let __footer_html__: any = ""
@@ -58,7 +67,10 @@ export let logger: Logger | null = null
 export let monitor: Monitor | null = null
 export let crc16: Crc16 | null = null
 
-// tunables
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SESSION_TTL_MS = 60 * 60 * 1000 // idle HTTP-auth sessions are dropped after 1h
 const SESSION_SWEEP_MS = 60 * 1000
 const BROADCAST_MIN_INTERVAL_MS = 250 // max dashboard push rate (urgent on/off air bypasses it)
@@ -68,10 +80,13 @@ const KEEPALIVE_INTERVAL_MS = 20000
 const SERVER_SILENCE_TIMEOUT_MS = 120000 // no datagram from xlxd for this long => reconnect
 const REFLECTOR_DOWN_AFTER_SECONDS = 24 * 3600 // reflector considered down if last contact is older than this
 
-// system variables
+const HTML_TYPE = "text/html; charset=utf-8"
+const TEXT_TYPE = "text/plain; charset=utf-8"
+
 /** Static asset routing table: request extension -> mime type + folder under config.__path__. */
 const filetypes: Record<string, { mimetype: string; folder: string }> = {
   ".ico": { mimetype: "image/x-icon", folder: "/images" },
+  ".webp": { mimetype: "image/webp", folder: "/media" },
   ".jpg": { mimetype: "image/jpeg", folder: "/images" },
   ".png": { mimetype: "image/png", folder: "/images" },
   ".gif": { mimetype: "image/gif", folder: "/images" },
@@ -90,11 +105,211 @@ const filetypes: Record<string, { mimetype: string; folder: string }> = {
   ".js": { mimetype: "text/javascript", folder: "/scripts" },
 }
 
-const HTML_TYPE = "text/html; charset=utf-8"
-const TEXT_TYPE = "text/plain; charset=utf-8"
+/** Free-text fields of reflectorlist.xml that are sanitized before parsing. */
+const REFLECTOR_TEXT_FIELDS: string[] = [
+  "comment",
+  "country",
+  "name",
+  "dashboardurl",
+]
 
-// HTTP-auth session bookkeeping (last time each ip was seen)
-const sessionSeen = new Map<string, number>()
+// ─────────────────────────────────────────────────────────────────────────────
+// XML helpers: sync parsing and sanitizing of loosely-formed XML
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * xml2js parses synchronously unless async:true is given; make that explicit and
+ * return the result (or throw) so callers never depend on callback ordering
+ */
+const parseXmlSync = (xml: string, options: any = {}): any => {
+  let error: any = null
+  let output: any = null
+
+  parseString(xml, { ...options, async: false }, (err: any, result: any) => {
+    error = err
+    output = result
+  })
+
+  if (error) throw error
+
+  return output
+}
+
+const escapeXml = (text: string): string => {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+/**
+ * Makes the text of selected leaf elements (<comment>, <country>, ...) well-formed
+ * XML 1.0 so free text such as `DStar <> DMR`, `R&D`, `Café &eacute;` or stray
+ * control characters cannot break the parser:
+ *
+ *  - bare `&`, `<`, `>` are escaped
+ *  - the 5 predefined entities and valid numeric references are kept (normalized)
+ *  - HTML named entities (&eacute; &nbsp; &euro; ...) are not defined in XML:
+ *    they are converted to numeric references; unknown ones are shown literally
+ *  - characters illegal in XML 1.0 (control chars, lone surrogates, U+FFFE/FFFF,
+ *    invalid numeric references) are removed
+ *  - CDATA sections are left alone (only illegal characters are removed)
+ *  - accented / non-ASCII characters are valid XML and are kept as is; typical
+ *    UTF-8-read-as-Latin-1 damage ("Ã©" -> "é") is repaired
+ */
+const XML_PREDEFINED_ENTITIES: string[] = ["amp", "lt", "gt", "quot", "apos"]
+
+// HTML 4 Latin-1 entities, code points 160..255 in order
+const LATIN1_ENTITY_NAMES: string[] = [
+  "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf", "laquo", "not", "shy", "reg", "macr",
+  "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para", "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest",
+  "Agrave", "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc", "Euml", "Igrave", "Iacute", "Icirc", "Iuml",
+  "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc", "Otilde", "Ouml", "times", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN", "szlig",
+  "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave", "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml",
+  "eth", "ntilde", "ograve", "oacute", "ocirc", "otilde", "ouml", "divide", "oslash", "ugrave", "uacute", "ucirc", "uuml", "yacute", "thorn", "yuml",
+]
+
+const EXTRA_HTML_ENTITIES: [string, number][] = [
+  ["OElig", 338], ["oelig", 339], ["Scaron", 352], ["scaron", 353], ["Yuml", 376], ["Zcaron", 381], ["zcaron", 382],
+  ["fnof", 402], ["circ", 710], ["tilde", 732], ["ensp", 8194], ["emsp", 8195], ["thinsp", 8201],
+  ["ndash", 8211], ["mdash", 8212], ["lsquo", 8216], ["rsquo", 8217], ["sbquo", 8218], ["ldquo", 8220], ["rdquo", 8221], ["bdquo", 8222],
+  ["dagger", 8224], ["Dagger", 8225], ["bull", 8226], ["hellip", 8230], ["permil", 8240], ["lsaquo", 8249], ["rsaquo", 8250],
+  ["euro", 8364], ["trade", 8482], ["larr", 8592], ["rarr", 8594],
+]
+
+const HTML_ENTITIES = new Map<string, number>()
+LATIN1_ENTITY_NAMES.forEach((name, index) => HTML_ENTITIES.set(name, 160 + index))
+for (const [name, code] of EXTRA_HTML_ENTITIES) HTML_ENTITIES.set(name, code)
+
+/** XML 1.0 `Char` production */
+const isXmlChar = (cp: number): boolean => {
+  return (
+    cp === 0x9 ||
+    cp === 0xa ||
+    cp === 0xd ||
+    (cp >= 0x20 && cp <= 0xd7ff) ||
+    (cp >= 0xe000 && cp <= 0xfffd) ||
+    (cp >= 0x10000 && cp <= 0x10ffff)
+  )
+}
+
+/** iterates by code point, so a lone surrogate shows up alone and is dropped */
+const stripInvalidXmlChars = (text: string): string => {
+  let out = ""
+
+  for (const ch of text) {
+    if (isXmlChar(ch.codePointAt(0) as number)) out += ch
+  }
+
+  return out
+}
+
+/** "Ã©" (UTF-8 bytes read as Latin-1) -> "é"; only when it round-trips cleanly */
+const repairMojibake = (text: string): string => {
+  if (
+    !/[Â-ô][\u0080-¿]/.test(text) ||
+    !/^[\u0000-ÿ]*$/.test(text)
+  )
+    return text
+
+  const repaired = Buffer.from(text, "latin1").toString("utf8")
+
+  return repaired.indexOf("�") === -1 ? repaired : text
+}
+
+/** bare `&` -> `&amp;`, HTML entities -> numeric references, invalid refs dropped */
+const fixEntities = (text: string): string => {
+  return text.replace(
+    /&(#x[0-9a-fA-F]+;|#[0-9]+;|[A-Za-z][A-Za-z0-9]*;)?/g,
+    (_match: string, ref?: string) => {
+      // bare ampersand ("R&D", "A & B", "&foo" without ';')
+      if (!ref) return "&amp;"
+
+      const name = ref.slice(0, -1)
+
+      if (name.charAt(0) === "#") {
+        const cp =
+          name.charAt(1) === "x"
+            ? parseInt(name.slice(2), 16)
+            : parseInt(name.slice(1), 10)
+        return isXmlChar(cp) ? `&#${cp};` : ""
+      }
+
+      if (XML_PREDEFINED_ENTITIES.indexOf(name) !== -1) return `&${name};`
+
+      const code = HTML_ENTITIES.get(name)
+
+      // unknown entity: keep it as visible text instead of failing the whole document
+      return code !== undefined ? `&#${code};` : `&amp;${name};`
+    },
+  )
+}
+
+/** make a piece of character data safe to embed between XML tags */
+const sanitizeXmlText = (text: string, repair: boolean = true): string => {
+  let out = stripInvalidXmlChars(text)
+
+  if (repair) out = repairMojibake(out)
+
+  return fixEntities(out).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+const escapeRegExp = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** sanitize the text of every `<field>...</field>` (plain tag, no attributes) in `xml` */
+const sanitizeXmlFields = (
+  xml: string,
+  fields: string[],
+  repair: boolean = true,
+): string => {
+  if (fields.length === 0) return xml
+
+  const re = new RegExp(
+    `<(${fields.map(escapeRegExp).join("|")})>([\\s\\S]*?)<\\/\\1>`,
+    "g",
+  )
+
+  return xml.replace(re, (_match: string, tag: string, body: string) => {
+    // odd indexes are CDATA sections (captured by the split), even ones plain text
+    const clean = body
+      .split(/(<!\[CDATA\[[\s\S]*?\]\]>)/)
+      .map((part: string, index: number) =>
+        index % 2 === 1
+          ? stripInvalidXmlChars(part)
+          : sanitizeXmlText(part, repair),
+      )
+      .join("")
+
+    return `<${tag}>${clean}</${tag}>`
+  })
+}
+
+/** Sanitize the free-text fields of reflectorlist.xml (name kept for API compatibility). */
+const sanitizeComments = (xml: string): string =>
+  sanitizeXmlFields(xml, REFLECTOR_TEXT_FIELDS)
+
+/** bytes -> string: UTF-8 (BOM tolerated), falling back to Windows-1252 for legacy files */
+const decodeXmlBuffer = (buffer: Buffer): string => {
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xef &&
+    buffer[1] === 0xbb &&
+    buffer[2] === 0xbf
+  )
+    buffer = buffer.subarray(3)
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer)
+  } catch (e) {
+    try {
+      return new TextDecoder("windows-1252").decode(buffer)
+    } catch (e2) {
+      return buffer.toString("latin1")
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Templates and exported list setters
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Page templates are static at runtime: read each file once and reuse. */
 const templateCache = new Map<string, string>()
@@ -109,7 +324,6 @@ const loadTemplate = (filename: string): string => {
 /** Replace every occurrence of `key` with `value` without regex semantics
  *  (so `$&` and friends in the value are not interpreted). */
 const replaceAll = (data: string, key: string, value: any): string => {
-  // split/join: replaces every occurrence and does not interpret "$&" style patterns in the value
   return data.split(key).join(String(value))
 }
 
@@ -146,9 +360,7 @@ const replaceSystemStrings = (
   return data
 }
 
-/**
- * the exported lists are only reassigned here and frozen, so importers cannot mutate them
- */
+/** The exported lists are only reassigned here and frozen, so importers cannot mutate them. */
 const setReflectorList = (list: any[]): void => {
   __reflectorList__ = Object.freeze(list) as any[]
 }
@@ -157,42 +369,12 @@ const setDmridList = (list: any[]): void => {
   __dmridList__ = Object.freeze(list) as any[]
 }
 
-/**
- * xml2js parses synchronously unless async:true is given; make that explicit and
- * return the result (or throw) so callers never depend on callback ordering
- */
-const parseXmlSync = (xml: string, options: any = {}): any => {
-  let error: any = null
-  let output: any = null
+// ─────────────────────────────────────────────────────────────────────────────
+// Network, auth and session helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-  parseString(xml, { ...options, async: false }, (err: any, result: any) => {
-    error = err
-    output = result
-  })
-
-  if (error) throw error
-
-  return output
-}
-
-/** Escape `<`, `>` and `&` inside `<comment>...</comment>` so free-text like
- *  `DStar <> DMR` does not break the XML parser (reflectorlist.xml). */
-const sanitizeComments = (xml: string): string => {
-  return xml.replace(/<comment>([\s\S]*?)<\/comment>/g, (_, body) => {
-    // already CDATA: leave alone
-    if (/^\s*<!\[CDATA\[[\s\S]*\]\]>\s*$/.test(body))
-      return `<comment>${body}</comment>`
-    const escaped = body
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-    return `<comment>${escaped}</comment>`
-  })
-}
-
-const escapeXml = (text: string): string => {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
+/** HTTP-auth session bookkeeping (last time each ip was seen). */
+const sessionSeen = new Map<string, number>()
 
 /** Normalise a socket remote address to a plain IPv4 string. */
 const getClientIp = (socket: any): string => {
@@ -201,9 +383,8 @@ const getClientIp = (socket: any): string => {
   return address.startsWith("::1") ? "127.0.0.1" : address.replace(/^.*:/, "")
 }
 
-/** Constant-time string compare. Hash first so lengths never leak. */
+/** Constant-time string compare. Hash first so both buffers have the same length. */
 const safeEqual = (a: string, b: string): boolean => {
-  // hash first so both buffers have the same length (no length leak) then compare in constant time
   const ha = crypto.createHash("sha256").update(a).digest()
   const hb = crypto.createHash("sha256").update(b).digest()
   return crypto.timingSafeEqual(ha, hb)
@@ -226,10 +407,11 @@ const dropSession = (ip: string): void => {
   sessionSeen.delete(ip)
 }
 
-/**
- * single place that writes a complete response, always with a status,
- * Content-Type and Content-Length
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP response helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Single place that writes a complete response: status, Content-Type, Content-Length. */
 const sendResponse = (
   res: any,
   status: number,
@@ -257,9 +439,7 @@ const error404 = (res: any): void => {
     .catch(() => sendResponse(res, 404, TEXT_TYPE, "Not found"))
 }
 
-/**
- * proxy a qrz.com image; settles on completion, rejects on any error/timeout
- */
+/** Proxy a qrz.com image; settles on completion, rejects on any error/timeout. */
 const getqrzimage = (url: string, res: any): Promise<void> => {
   return new Promise<void>((resolve, reject) => {
     const request = https.get(url, { timeout: 10000 }, (response: any) => {
@@ -286,7 +466,13 @@ const getqrzimage = (url: string, res: any): Promise<void> => {
   })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Monitor
+// ─────────────────────────────────────────────────────────────────────────────
+
 export class Monitor {
+  // ── state ──────────────────────────────────────────────────────────────────
+
   public ticker: any = null
   private client: any = null
   private reflector: any[] = []
@@ -325,6 +511,8 @@ export class Monitor {
       offair: "",
     }
   }
+
+  // ── data sources: xlxd log, DMR ids, reflector list ────────────────────────
 
   /** Convert the xlxd log file into the dashboard JSON shape and persist it
    *  to `xlxd.json` so a restart can seed the UI before live data arrives. */
@@ -448,8 +636,8 @@ export class Monitor {
   }
 
   /** Parse `reflectorlist.xml` into the global reflector list.
-   *  Free-text `<comment>` values are sanitized first, and the file mtime
-   *  is remembered to decide "up" vs "down" later. */
+   *  The file is decoded (UTF-8 / Windows-1252) and its free-text fields are
+   *  sanitized first; the file mtime is kept to decide "up" vs "down" later. */
   parseXmlReflectorList() {
     const file = `${config.__path__}assets/reflectorlist.xml`
 
@@ -459,7 +647,7 @@ export class Monitor {
 
     try {
       const xmldata: string = sanitizeComments(
-        fs.readFileSync(file).toString("utf-8"),
+        decodeXmlBuffer(fs.readFileSync(file)),
       )
       const results = parseXmlSync(xmldata)
       const list = results?.XLXAPI?.answer?.[0]?.reflectorlist?.[0]?.reflector
@@ -486,7 +674,6 @@ export class Monitor {
       // tolerate a millisecond timestamp
       if (lastContact > 1e11) lastContact = lastContact / 1000
 
-      // always a string: "down" or "<n>days"
       const down: boolean =
         isNaN(uptimeSeconds) ||
         (!isNaN(lastContact) &&
@@ -508,10 +695,10 @@ export class Monitor {
     return js
   }
 
+  // ── HTTP server ────────────────────────────────────────────────────────────
+
   /**
-   *
    * to be done https://objsal.medium.com/how-to-encode-node-js-response-from-scratch-ce520018d6
-   *
    */
 
   /** Top-level HTTP entry point. Wraps handleRequest so one bad request can
@@ -527,8 +714,7 @@ export class Monitor {
     }
   }
 
-  /** Route a single HTTP request: method + auth checks, qrz proxy, JSON
-   *  assets, dynamic pages, static files. */
+  /** Route a single HTTP request: auth, qrz proxy, JSON assets, pages, static files. */
   private handleRequest(req: any, res: any) {
     // per request, never stored globally
     const userAgent: string = String(req.headers["user-agent"] ?? "")
@@ -536,70 +722,13 @@ export class Monitor {
 
     if (isMobile) logger!.info(`mobile phone connection ${userAgent}`)
 
-    const clientIp = getClientIp(req.socket)
-
-    if (config.__web_auth__) {
-      const unauthorized = () =>
-        sendResponse(res, 401, TEXT_TYPE, "", {
-          "WWW-Authenticate": 'Basic realm="ndmonitor"',
-        })
-
-      const authHeader: string | undefined = req.headers["authorization"]
-      if (!authHeader) return unauthorized()
-
-      const [scheme, token] = authHeader.split(" ")
-
-      // anything but a valid Basic credential is rejected (was: any other scheme skipped the check)
-      if (!scheme || scheme.toLowerCase() !== "basic" || !token)
-        return unauthorized()
-
-      const decodedData = Buffer.from(token, "base64").toString()
-      const separator = decodedData.indexOf(":")
-      const username =
-        separator === -1 ? decodedData : decodedData.substring(0, separator)
-      const password =
-        separator === -1 ? "" : decodedData.substring(separator + 1)
-
-      if (
-        !safeEqual(
-          crc16!.compute(username, config.__web_secret_key__).toString(),
-          password,
-        )
-      )
-        return unauthorized()
-
-      /**
-       * authenticated, add to session (swept when idle) and continue
-       */
-      touchSession(clientIp)
-    }
+    if (config.__web_auth__ && !this.authenticate(req, res)) return
 
     const rawUrl: string = String(req.url ?? "/")
 
-    /**
-     * qrz.com image proxy
-     */
+    // qrz.com image proxy
     const qrzIndex = rawUrl.indexOf("https://www.qrz.com/lookup/")
-    if (qrzIndex != -1) {
-      let target: URL
-
-      try {
-        target = new URL(rawUrl.substring(qrzIndex))
-      } catch (e) {
-        return sendResponse(res, 400, TEXT_TYPE, "Bad request")
-      }
-
-      if (target.protocol !== "https:" || target.hostname !== "www.qrz.com")
-        return sendResponse(res, 400, TEXT_TYPE, "Bad request")
-
-      getqrzimage(target.toString(), res).catch((err: any) => {
-        logger!.error(`qrz image request failed: ${err}`)
-
-        if (!res.headersSent) sendResponse(res, 502, TEXT_TYPE, "Bad gateway")
-        else res.destroy()
-      })
-      return
-    }
+    if (qrzIndex != -1) return this.proxyQrz(rawUrl.substring(qrzIndex), res)
 
     // path only (no query/fragment), percent-decoded
     let urlPath: string
@@ -613,61 +742,13 @@ export class Monitor {
     if (urlPath.indexOf("\0") != -1)
       return sendResponse(res, 400, TEXT_TYPE, "Bad request")
 
-    if (urlPath.toLowerCase().endsWith(".json")) {
-      // basename only: no directory components can survive
-      const filename: string = path.basename(urlPath)
-
-      // Chrome DevTools probes for a workspace-mapping file; answer 404 quietly.
-      if (filename === "com.chrome.devtools.json")
-        return sendResponse(res, 404, TEXT_TYPE, "Not found")
-
-      const filepath = path.join(`${config.__path__}assets`, filename)
-
-      if (req.headers["sec-gpc"] === "1") {
-        // signal detected, do something
-        logger!.info(`gpc request detected`)
-      }
-
-      let size: number
-
-      try {
-        const st = fs.statSync(filepath)
-
-        if (!st.isFile()) return error404(res)
-
-        size = st.size
-      } catch (e) {
-        // a missing JSON file is a normal 404, not an application error
-        logger!.info(`json file not found: ${filename}`)
-        return error404(res)
-      }
-
-      const fileStream = fs.createReadStream(filepath)
-
-      fileStream.once("open", () => {
-        res.writeHead(200, {
-          "Content-Type": "application/json",
-          "Content-Length": size,
-        })
-        fileStream.pipe(res)
-      })
-
-      // Handle any errors that might occur during streaming
-      fileStream.on("error", (err) => {
-        logger!.error(`Error reading the file: ${err}`)
-
-        if (!res.headersSent)
-          sendResponse(res, 500, TEXT_TYPE, "Internal Server Error")
-        else res.destroy()
-      })
-
-      res.on("close", () => fileStream.destroy())
-      return
-    }
+    if (urlPath.toLowerCase().endsWith(".json"))
+      return this.serveJson(urlPath, req, res)
 
     switch (urlPath) {
       case "/":
       case "/index.html":
+        // case "/index_new.html":
         return sendResponse(
           res,
           200,
@@ -679,6 +760,7 @@ export class Monitor {
         )
 
       case "/reflectors.html":
+      case "/peers.html":
         return sendResponse(
           res,
           200,
@@ -689,46 +771,159 @@ export class Monitor {
           ),
         )
 
-      default: {
-        const ext = path.extname(urlPath).toLowerCase()
-        const filetype = Object.prototype.hasOwnProperty.call(filetypes, ext)
-          ? filetypes[ext]
-          : undefined
-
-        if (!filetype) return error404(res)
-
-        const folder: string = filetype.folder
-        const mimetype: string = filetype.mimetype
-        const root: string = path.resolve(`${config.__path__}${folder}`)
-        let filename: string = urlPath
-
-        // any icon from old apple device
-        if (filename.indexOf("apple-touch-icon") != -1)
-          filename = "/apple-touch-icon.png"
-
-        let target: string = path.join(root, filename)
-
-        // path traversal guard: the resolved file must stay inside its folder
-        if (!target.startsWith(root + path.sep)) return error404(res)
-
-        // if bitmap does not exist return site logo
-        if (!fs.existsSync(target)) {
-          if (folder === "/images") target = path.join(root, "sitelogo.png")
-          else return sendResponse(res, 200, mimetype, "")
-        }
-
-        fs.promises
-          .readFile(target)
-          .then((content) => sendResponse(res, 200, mimetype, content))
-          .catch(() => error404(res))
-        return
-      }
+      default:
+        return this.serveStatic(urlPath, res)
     }
   }
 
+  /** Basic-auth check. Sends 401 and returns false on failure; registers the session on success. */
+  private authenticate(req: any, res: any): boolean {
+    const unauthorized = (): boolean => {
+      sendResponse(res, 401, TEXT_TYPE, "", {
+        "WWW-Authenticate": 'Basic realm="ndmonitor"',
+      })
+      return false
+    }
+
+    const authHeader: string | undefined = req.headers["authorization"]
+    if (!authHeader) return unauthorized()
+
+    const [scheme, token] = authHeader.split(" ")
+
+    // anything but a valid Basic credential is rejected
+    if (!scheme || scheme.toLowerCase() !== "basic" || !token)
+      return unauthorized()
+
+    const decodedData = Buffer.from(token, "base64").toString()
+    const separator = decodedData.indexOf(":")
+    const username =
+      separator === -1 ? decodedData : decodedData.substring(0, separator)
+    const password =
+      separator === -1 ? "" : decodedData.substring(separator + 1)
+
+    if (
+      !safeEqual(
+        crc16!.compute(username, config.__web_secret_key__).toString(),
+        password,
+      )
+    )
+      return unauthorized()
+
+    // authenticated: register the session (swept when idle)
+    touchSession(getClientIp(req.socket))
+    return true
+  }
+
+  /** Validate and proxy a qrz.com lookup image. */
+  private proxyQrz(url: string, res: any) {
+    let target: URL
+
+    try {
+      target = new URL(url)
+    } catch (e) {
+      return sendResponse(res, 400, TEXT_TYPE, "Bad request")
+    }
+
+    if (target.protocol !== "https:" || target.hostname !== "www.qrz.com")
+      return sendResponse(res, 400, TEXT_TYPE, "Bad request")
+
+    getqrzimage(target.toString(), res).catch((err: any) => {
+      logger!.error(`qrz image request failed: ${err}`)
+
+      if (!res.headersSent) sendResponse(res, 502, TEXT_TYPE, "Bad gateway")
+      else res.destroy()
+    })
+  }
+
+  /** Stream a JSON file from the assets folder (basename only: no traversal). */
+  private serveJson(urlPath: string, req: any, res: any) {
+    const filename: string = path.basename(urlPath)
+
+    // Chrome DevTools probes for a workspace-mapping file; answer 404 quietly.
+    if (filename === "com.chrome.devtools.json")
+      return sendResponse(res, 404, TEXT_TYPE, "Not found")
+
+    const filepath = path.join(`${config.__path__}assets`, filename)
+
+    if (req.headers["sec-gpc"] === "1") {
+      // signal detected, do something
+      logger!.info(`gpc request detected`)
+    }
+
+    let size: number
+
+    try {
+      const st = fs.statSync(filepath)
+
+      if (!st.isFile()) return error404(res)
+
+      size = st.size
+    } catch (e) {
+      // a missing JSON file is a normal 404, not an application error
+      logger!.info(`json file not found: ${filename}`)
+      return error404(res)
+    }
+
+    const fileStream = fs.createReadStream(filepath)
+
+    fileStream.once("open", () => {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Length": size,
+      })
+      fileStream.pipe(res)
+    })
+
+    fileStream.on("error", (err) => {
+      logger!.error(`Error reading the file: ${err}`)
+
+      if (!res.headersSent)
+        sendResponse(res, 500, TEXT_TYPE, "Internal Server Error")
+      else res.destroy()
+    })
+
+    res.on("close", () => fileStream.destroy())
+  }
+
+  /** Serve a static asset from the folder mapped to its extension. */
+  private serveStatic(urlPath: string, res: any) {
+    const ext = path.extname(urlPath).toLowerCase()
+    const filetype = Object.prototype.hasOwnProperty.call(filetypes, ext)
+      ? filetypes[ext]
+      : undefined
+
+    if (!filetype) return error404(res)
+
+    const folder: string = filetype.folder
+    const mimetype: string = filetype.mimetype
+    const root: string = path.resolve(`${config.__path__}${folder}`)
+    let filename: string = urlPath
+
+    // any icon from old apple device
+    if (filename.indexOf("apple-touch-icon") != -1)
+      filename = "/apple-touch-icon.png"
+
+    let target: string = path.join(root, filename)
+
+    // path traversal guard: the resolved file must stay inside its folder
+    if (!target.startsWith(root + path.sep)) return error404(res)
+
+    // if bitmap does not exist return site logo
+    if (!fs.existsSync(target)) {
+      if (folder === "/images") target = path.join(root, "sitelogo.png")
+      else return sendResponse(res, 200, mimetype, "")
+    }
+
+    fs.promises
+      .readFile(target)
+      .then((content) => sendResponse(res, 200, mimetype, content))
+      .catch(() => error404(res))
+  }
+
+  // ── UDP link to xlxd ───────────────────────────────────────────────────────
+
   /** Send a datagram to the xlxd server. Reconnects on failure. */
   send(data: Buffer) {
-    //sending msg
     const client = this.client
 
     if (!client) return
@@ -751,9 +946,7 @@ export class Monitor {
     }
   }
 
-  /**
-   * tear down the udp socket and its timers; safe to call repeatedly
-   */
+  /** Tear down the udp socket and its timers; safe to call repeatedly. */
   private stopClient() {
     for (const timer of this.startTimers) clearTimeout(timer)
 
@@ -779,29 +972,6 @@ export class Monitor {
     }
   }
 
-  /** Graceful shutdown: stop UDP, timers, WebSocket and HTTP servers. */
-  async shutdown(): Promise<void> {
-    this.stopClient()
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    if (this.broadcastTimer) {
-      clearTimeout(this.broadcastTimer)
-      this.broadcastTimer = null
-    }
-    if (this.sessionSweeper) {
-      clearInterval(this.sessionSweeper)
-      this.sessionSweeper = null
-    }
-    try {
-      this.dashboardServer?.close()
-    } catch {}
-    await new Promise<void>((r) =>
-      this.webServer ? this.webServer.close(() => r()) : r(),
-    )
-  }
-
   /** Schedule a single reconnect attempt (idempotent while one is pending). */
   private scheduleReconnect() {
     if (this.reconnectTimer) return
@@ -818,226 +988,11 @@ export class Monitor {
     }, RECONNECT_DELAY_MS)
   }
 
-  /**
-   * broadcast the current traffic to dashboard clients, at most every
-   * BROADCAST_MIN_INTERVAL_MS unless `force` is set
-   */
-  private broadcast(force: boolean = false) {
-    const server = this.dashboardServer
-
-    if (!server) return
-
-    const now = Date.now()
-    const wait = this.lastBroadcast + BROADCAST_MIN_INTERVAL_MS - now
-
-    if (!force && wait > 0) {
-      // coalesce: the latest state is sent when the timer fires
-      if (!this.broadcastTimer) {
-        this.broadcastTimer = setTimeout(() => {
-          this.broadcastTimer = null
-          this.broadcast(true)
-        }, wait)
-      }
-      return
-    }
-
-    if (this.broadcastTimer) {
-      clearTimeout(this.broadcastTimer)
-      this.broadcastTimer = null
-    }
-
-    this.lastBroadcast = now
-
-    // serialize once, lazily, only if somebody is listening
-    let payload: string | null = null
-
-    server.clients.forEach((ws: any) => {
-      if (ws.fromPage && ws.page === "dashboard" && ws.readyState === 1) {
-        if (payload === null)
-          payload = JSON.stringify({
-            TRAFFIC: this.jsonStr["xlxd"],
-            BIGEARS: server.clients.size,
-          })
-
-        ws.send(payload, (err: any) => {
-          if (err) logger!.error(`dashboard send failed: ${err}`)
-        })
-      }
-    })
-  }
-
-  /** Decode one UDP datagram from xlxd, rebuild `jsonStr`, and push to dashboards. */
-  private handleServerMessage(buffer: Buffer, info: any) {
-    let callsign: string = ""
-    let OnModule: string = " "
-    let entry: any = null
-
-    this.lastRx = Date.now()
-
-    if (config.__loginfo__) {
-      console.log("Data received from server : " + buffer.toString())
-      console.log(
-        "Received %d bytes from %s:%d\n",
-        buffer.length,
-        info.address,
-        info.port,
-      )
-    }
-
-    let msg: any
-
-    try {
-      msg = JSON.parse(buffer.toString())
-    } catch (err: any) {
-      logger!.error(
-        `discarding malformed datagram from ${info.address}:${info.port}: ${err.message}`,
-      )
-      return
-    }
-
-    if (msg === null || typeof msg !== "object") return
-
-    const has = (key: string): boolean =>
-      Object.prototype.hasOwnProperty.call(msg, key)
-
-    try {
-      // console.log(JSON.stringify(msg))
-
-      this.onair = ""
-      this.offair = ""
-
-      if (has("PING")) {
-        this.send(Buffer.from("PONG"))
-        console.log("got PING message")
-      }
-
-      if (has("reflector")) {
-        this.reflector = msg.reflector
-        console.log(this.reflector.toString() + " reflector")
-      }
-
-      if (has("modules")) {
-        this.modules = msg.modules
-        console.log(this.modules.toString() + " modules")
-      }
-
-      if (has("nodes") && Array.isArray(msg.nodes)) {
-        this.nodes = msg.nodes
-        // console.log(this.nodes.toString() + " nodes")
-      }
-
-      if (has("stations") && Array.isArray(msg.stations)) {
-        this.stations = msg.stations
-        // console.log(this.stations.toString() + " stations")
-      }
-
-      if (has("onair")) {
-        this.onair = typeof msg.onair === "string" ? msg.onair : ""
-        console.log(this.onair + " on Air")
-      }
-
-      if (has("offair")) {
-        this.offair = typeof msg.offair === "string" ? msg.offair : ""
-        console.log(this.offair + " off Air")
-      }
-
-      this.jsonStr = {
-        xlxd: {
-          Version: __version__,
-          LinkedPeers: {
-            Reflector: this.reflector,
-            Peer: [],
-          },
-          LinkedNodes: {
-            Reflector: this.reflector,
-            Nodes: [],
-          },
-          HeardUsers: {
-            Reflector: this.reflector,
-            Station: [],
-          },
-          onair: this.onair,
-          offair: this.offair,
-        },
-      }
-
-      /**
-       * NODES
-       */
-      for (let item of this.nodes) {
-        callsign = item["callsign"].trim()
-
-        entry = {
-          Callsign: `${callsign}   ${item["module"]}`,
-          IP: "*.*.*.*",
-          LinkedModule: item["linkedto"].trim(),
-          Protocol: " ",
-          ConnectTime: item["time"].trim(),
-          LastHeardTime: item["time"].trim(),
-        }
-
-        if (item["module"] === " ") {
-          entry["Protocol"] = callsign.substring(0, 3)
-
-          const peers: any[] = this.jsonStr["xlxd"]["LinkedPeers"]["Peer"]
-
-          // a peer is listed once; further modules of the same peer are appended to it
-          const existing = peers.find(
-            (peer: any) => String(peer["Callsign"]).trim() === callsign,
-          )
-
-          if (existing)
-            existing["LinkedModule"] =
-              existing["LinkedModule"] + entry["LinkedModule"]
-          else peers.push(entry)
-        } else this.jsonStr["xlxd"]["LinkedNodes"]["Nodes"].push(entry)
-      }
-
-      for (let item of this.stations) {
-        callsign = item["callsign"].trim()
-        OnModule = " "
-
-        for (let node of this.nodes) {
-          if (
-            item["node"] == node["callsign"] &&
-            item["module"] == node["module"]
-          ) {
-            OnModule = node["linkedto"]
-            break
-          }
-        }
-
-        // { 'DATE': REPORT_DATE, 'TIME': REPORT_TIME, 'TYPE': REPORT_TYPE.substring(6), 'PACKET': REPORT_PACKET, 'SYS': REPORT_SYS, 'SRC_ID': REPORT_SRC_ID, 'TS': REPORT_TS, 'TGID': REPORT_TGID, 'ALIAS': REPORT_ALIAS, 'DMRID': REPORT_DMRID, 'CALLSIGN': REPORT_CALLSIGN, 'NAME': REPORT_FNAME, 'DELAY': 0 }
-
-        entry = {
-          Callsign: callsign.trim(),
-          Packet:
-            callsign.trim() == this.onair
-              ? "START"
-              : callsign.trim() == this.offair
-                ? "END"
-                : "N/A",
-          ViaNode: `${item["node"].trim()} ${item["module"].trim()}`,
-          OnModule: OnModule,
-          ViaPeer: "",
-          LastHeardTime: item["time"].trim(),
-        }
-
-        this.jsonStr["xlxd"]["HeardUsers"]["Station"].push(entry)
-      }
-
-      // START/END transitions must not be coalesced away, everything else is throttled
-      this.broadcast(has("onair") || has("offair"))
-    } catch (err: any) {
-      logger!.error(`Error processing server message: ${err}`)
-    }
-  }
-
   /** Open the UDP socket to xlxd, wire listeners, and schedule hello / keepalive. */
   connectToServer() {
     this.stopClient()
 
-    const client: any = udp.createSocket("udp4") // creating a client socket
+    const client: any = udp.createSocket("udp4")
     this.client = client
     this.lastRx = Date.now()
 
@@ -1080,12 +1035,356 @@ export class Monitor {
     )
   }
 
-  /** Boot sequence: banner, templates, WS + HTTP servers, file download, seed,
-   *  then connect to xlxd. */
+  private maskIp(ip: String) {
+    const parts = ip.split('.');
+    const valid =
+      parts.length === 4 &&
+      parts.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+
+    if (!valid) {
+      throw new Error('Invalid IPv4 address: ' + ip);
+    }
+    return `*.*.*.${parts[3]}`;
+  }
+
+  /** Decode one UDP datagram from xlxd, rebuild `jsonStr`, and push to dashboards. */
+  private handleServerMessage(buffer: Buffer, info: any) {
+    let callsign: string = ""
+    let OnModule: string = " "
+    let entry: any = null
+
+    this.lastRx = Date.now()
+
+    if (config.__loginfo__) {
+      console.log("Data received from server : " + buffer.toString())
+      console.log(
+        "Received %d bytes from %s:%d\n",
+        buffer.length,
+        info.address,
+        info.port,
+      )
+    }
+
+    let msg: any
+
+    try {
+      msg = JSON.parse(buffer.toString())
+    } catch (err: any) {
+      logger!.error(
+        `discarding malformed datagram from ${info.address}:${info.port}: ${err.message}`,
+      )
+      return
+    }
+
+
+    if (msg === null || typeof msg !== "object") return
+
+    const has = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(msg, key)
+
+    try {
+      // -- update cached state from the message --
+
+      this.onair = ""
+      this.offair = ""
+
+      if (has("PING")) {
+        this.send(Buffer.from("PONG"))
+        console.log("got PING message")
+      }
+
+      if (has("reflector")) {
+        this.reflector = msg.reflector
+        console.log(this.reflector.toString() + " reflector")
+      }
+
+      if (has("modules")) {
+        this.modules = msg.modules
+        console.log(this.modules.toString() + " modules")
+      }
+
+      if (has("nodes") && Array.isArray(msg.nodes)) {
+        this.nodes = msg.nodes
+      }
+
+      if (has("stations") && Array.isArray(msg.stations)) {
+        this.stations = msg.stations
+      }
+
+      if (has("onair")) {
+        this.onair = typeof msg.onair === "string" ? msg.onair : ""
+        console.log(this.onair + " on Air")
+      }
+
+      if (has("offair")) {
+        this.offair = typeof msg.offair === "string" ? msg.offair : ""
+        console.log(this.offair + " off Air")
+      }
+
+      // -- rebuild the traffic snapshot --
+
+      this.jsonStr = {
+        xlxd: {
+          Version: __version__,
+          LinkedPeers: {
+            Reflector: this.reflector,
+            Peer: [],
+          },
+          LinkedNodes: {
+            Reflector: this.reflector,
+            Nodes: [],
+          },
+          HeardUsers: {
+            Reflector: this.reflector,
+            Station: [],
+          },
+          onair: this.onair,
+          offair: this.offair,
+        },
+      }
+
+      // nodes: split into peers (module " ") and linked nodes
+      for (let item of this.nodes) {
+        callsign = item["callsign"].trim()
+
+        let ip = item["IP"] ? this.maskIp(item["IP"]) : "*.*.*.*";
+
+        entry = {
+          Callsign: `${callsign}   ${item["module"]}`,
+          IP: ip,
+          LinkedModule: item["linkedto"].trim(),
+          Protocol: " ",
+          ConnectTime: item["time"].trim(),
+          LastHeardTime: item["time"].trim(),
+        }
+
+        if (item["module"] === " ") {
+          entry["Protocol"] = callsign.substring(0, 3)
+
+          const peers: any[] = this.jsonStr["xlxd"]["LinkedPeers"]["Peer"]
+
+          // a peer is listed once; further modules of the same peer are appended to it
+          const existing = peers.find(
+            (peer: any) => String(peer["Callsign"]).trim() === callsign,
+          )
+
+          if (existing) {
+            existing["LinkedModule"] = existing["LinkedModule"] + entry["LinkedModule"]
+          }
+          else {            
+            peers.push(entry)
+          }
+        } else this.jsonStr["xlxd"]["LinkedNodes"]["Nodes"].push(entry)
+      }
+
+      // stations: heard users with the module of the node they came through
+      for (let item of this.stations) {
+        callsign = item["callsign"].trim()
+        OnModule = " "
+
+        for (let node of this.nodes) {
+          if (
+            item["node"] == node["callsign"] &&
+            item["module"] == node["module"]
+          ) {
+            OnModule = node["linkedto"]
+            break
+          }
+        }
+
+        entry = {
+          Callsign: callsign.trim(),
+          Packet:
+            callsign.trim() == this.onair
+              ? "START"
+              : callsign.trim() == this.offair
+                ? "END"
+                : "N/A",
+          ViaNode: `${item["node"].trim()} ${item["module"].trim()}`,
+          OnModule: OnModule,
+          ViaPeer: "",
+          LastHeardTime: item["time"].trim(),
+        }
+
+        this.jsonStr["xlxd"]["HeardUsers"]["Station"].push(entry)
+      }
+
+      // START/END transitions must not be coalesced away, everything else is throttled
+      this.broadcast(has("onair") || has("offair"))
+    } catch (err: any) {
+      logger!.error(`Error processing server message: ${err}`)
+    }
+  }
+
+  // ── dashboard WebSocket ────────────────────────────────────────────────────
+
+  /**
+   * broadcast the current traffic to dashboard clients, at most every
+   * BROADCAST_MIN_INTERVAL_MS unless `force` is set
+   */
+  private broadcast(force: boolean = false) {
+    const server = this.dashboardServer
+
+    if (!server) return
+
+    const now = Date.now()
+    const wait = this.lastBroadcast + BROADCAST_MIN_INTERVAL_MS - now
+
+    if (!force && wait > 0) {
+      // coalesce: the latest state is sent when the timer fires
+      if (!this.broadcastTimer) {
+        this.broadcastTimer = setTimeout(() => {
+          this.broadcastTimer = null
+          this.broadcast(true)
+        }, wait)
+      }
+      return
+    }
+
+    if (this.broadcastTimer) {
+      clearTimeout(this.broadcastTimer)
+      this.broadcastTimer = null
+    }
+
+    this.lastBroadcast = now
+
+    // serialize once, lazily, only if somebody is listening
+    let payload: string | null = null
+
+    server.clients.forEach((ws: any) => {
+      if (ws.fromPage && (ws.page === "dashboard" || ws.page === "peers") && ws.readyState === 1) {
+        if (payload === null)
+          payload = JSON.stringify({
+            TRAFFIC: this.jsonStr["xlxd"],
+            BIGEARS: server.clients.size,
+          })
+
+        ws.send(payload, (err: any) => {
+          if (err) logger!.error(`dashboard send failed: ${err}`)
+        })
+      }
+    })
+  }
+
+  /** Create the dashboard WebSocket server and its per-connection handlers.
+   *  https://github.com/websockets/ws#simple-server */
+  private startDashboardServer() {
+    try {
+      logger!.info(
+        `creating dashboard socket server on port:${config.__socketServerPort__}`,
+      )
+
+      const server = new WebSocketServer({
+        port: config.__socketServerPort__,
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            // See zlib defaults.
+            chunkSize: 1024,
+            memLevel: 7,
+            level: 3,
+          },
+          zlibInflateOptions: {
+            chunkSize: 10 * 1024,
+          },
+          clientNoContextTakeover: true,
+          serverNoContextTakeover: true,
+          serverMaxWindowBits: 10,
+          concurrencyLimit: 10, // Limits zlib concurrency for perf.
+          threshold: 1024, // Size (in bytes) below which messages are not compressed.
+        },
+      })
+
+      this.dashboardServer = server
+
+      server.on("error", (err: any) =>
+        logger!.error(`WebSocketServer error: ${err}`),
+      )
+
+      logger!.info(
+        `dashboard socket server created ${config.__socketServerPort__} ${globals.__OK__}\n`,
+      )
+
+      server.on("connection", (ws: any, req: any) => {
+        let _message: any = {}
+
+        // connection info: page name, saved as extra properties on the socket
+        const urlParams = new URLSearchParams(req.url.substring(1))
+        ws.page = urlParams.get("page") ? urlParams.get("page") : "generic"
+        ws.fromPage = true
+        ws.connectTime = Date.now()
+
+        const requestip = getClientIp(req.socket)
+
+        logger!.info(`\nWebSocket connection from page ${ws.page}`)
+
+        // initial packet
+        if (ws.fromPage) {
+          _message["BIGEARS"] = server.clients.size.toString()
+        }
+
+        if (ws.page === "dashboard" || ws.page === "peers")
+          _message["PACKETS"] = { TRAFFIC: this.jsonStr["xlxd"] }
+
+        if (ws.page === "reflectors")
+          _message["REFLECTORS"] = this.getReflectors()
+
+        ws.on("error", console.error)
+
+        ws.on("message", (payload: any) => {
+          ws.connectTime = Date.now()
+
+          if (config.__loginfo__) logger!.info(`command received: ${payload}`)
+        })
+
+        ws.on("close", () => {
+          if (config.__web_auth__) dropSession(requestip)
+        })
+
+        ws.send(JSON.stringify({ CONFIG: _message }))
+      })
+    } catch (e: any) {
+      logger!.info(`Error creating WebSocketServer: ${e.toString()}`)
+    }
+  }
+
+  // ── lifecycle ──────────────────────────────────────────────────────────────
+
+  /** Boot sequence: banner, templates, session sweeper, WS + HTTP servers,
+   *  data download, then connect to xlxd. */
   init() {
-    /**
-     * https://manytools.org/hacker-tools/ascii-banner/ (rowan cap font)
-     */
+    this.printBanner()
+
+    // footer must be loaded first: the other templates embed it
+    __footer_html__ = replaceSystemStrings(
+      loadTemplate(`${config.__path__}pages/${config.__footer__}`),
+    )
+    __siteLogo_html__ = replaceSystemStrings(
+      loadTemplate(`${config.__path__}pages/${config.__siteLogo__}`),
+    )
+    __buttonBar_html__ = replaceSystemStrings(
+      loadTemplate(`${config.__path__}pages/${config.__buttonBar__}`),
+    )
+
+    // idle HTTP-auth sessions are removed so the session table cannot grow without bound
+    if (config.__web_auth__) {
+      this.sessionSweeper = setInterval(() => {
+        const now = Date.now()
+
+        for (const [ip, seen] of sessionSeen) {
+          if (now - seen > SESSION_TTL_MS) dropSession(ip)
+        }
+      }, SESSION_SWEEP_MS)
+
+      this.sessionSweeper.unref()
+    }
+
+    this.startDashboardServer()
+    this.startWebServer()
+    this.downloadData()
+  }
+
+  /** https://manytools.org/hacker-tools/ascii-banner/ (rowan cap font) */
+  private printBanner() {
     logger!.info(`${globals.__CLEAR__}${globals.__HOME__}`)
 
     logger!.info(
@@ -1109,150 +1408,32 @@ export class Monitor {
     logger!.info(
       `\nNDMonitor v${__version__} (c) 2023-26 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>`,
     )
+  }
 
-    // must be first
-    __footer_html__ = replaceSystemStrings(
-      loadTemplate(`${config.__path__}pages/${config.__footer__}`),
-    )
-
-    __siteLogo_html__ = replaceSystemStrings(
-      loadTemplate(`${config.__path__}pages/${config.__siteLogo__}`),
-    )
-    __buttonBar_html__ = replaceSystemStrings(
-      loadTemplate(`${config.__path__}pages/${config.__buttonBar__}`),
-    )
-
-    /**
-     * idle HTTP-auth sessions are removed so the session table cannot grow without bound
-     */
-    if (config.__web_auth__) {
-      this.sessionSweeper = setInterval(() => {
-        const now = Date.now()
-
-        for (const [ip, seen] of sessionSeen) {
-          if (now - seen > SESSION_TTL_MS) dropSession(ip)
-        }
-      }, SESSION_SWEEP_MS)
-
-      this.sessionSweeper.unref()
-    }
-
-    /**
-     * dashboard websocket server
-     *
-     * create socket server https://github.com/websockets/ws#simple-server
-     */
+  /** Create and start the HTTP server. */
+  private startWebServer() {
     try {
-      logger!.info(
-        `creating dashboard socket server on port:${config.__socketServerPort__}`,
-      )
+      const hostServer: string = config.__localhost__
+      const web = http.createServer(this.requestListener)
+      this.webServer = web
 
-      const server = new WebSocketServer({
-        port: config.__socketServerPort__,
-        perMessageDeflate: {
-          zlibDeflateOptions: {
-            // See zlib defaults.
-            chunkSize: 1024,
-            memLevel: 7,
-            level: 3,
-          },
-          zlibInflateOptions: {
-            chunkSize: 10 * 1024,
-          },
-          // Other options settable:
-          clientNoContextTakeover: true, // Defaults to negotiated value.
-          serverNoContextTakeover: true, // Defaults to negotiated value.
-          serverMaxWindowBits: 10, // Defaults to negotiated value.
-          // Below options specified as default values.
-          concurrencyLimit: 10, // Limits zlib concurrency for perf.
-          threshold: 1024, // Size (in bytes) below which messages
-          // should not be compressed if context takeover is disabled.
-        },
+      web.on("error", (err: any) => {
+        logger!.error(`Web server error: ${err}`)
       })
 
-      this.dashboardServer = server
-
-      server.on("error", (err: any) =>
-        logger!.error(`WebSocketServer error: ${err}`),
-      )
-
-      logger!.info(
-        `dashboard socket server created ${config.__socketServerPort__} ${globals.__OK__}\n`,
-      )
-
-      server.on("connection", (ws: any, req: any) => {
-        let _message: any = {}
-
-        /**
-         * get connection information (page name)
-         * page name
-         *
-         * save that into extra properties
-         * page
-         * fromPage (assume true)
-         * connectTime
-         */
-        const urlParams = new URLSearchParams(req.url.substring(1))
-        ws.page = urlParams.get("page") ? urlParams.get("page") : "generic"
-        ws.fromPage = true
-        ws.connectTime = Date.now()
-
-        // get ip address
-        const requestip = getClientIp(req.socket)
-
-        logger!.info(`\nWebSocket connection from page ${ws.page}`)
-
-        // prepare initial packet
-        if (ws.fromPage) {
-          _message["BIGEARS"] = server.clients.size.toString()
-        }
-
-        if (ws.page === "dashboard")
-          _message["PACKETS"] = { TRAFFIC: this.jsonStr["xlxd"] }
-
-        if (ws.page === "reflectors")
-          _message["REFLECTORS"] = this.getReflectors()
-
-        ws.on("error", console.error)
-
-        ws.on("message", (payload: any) => {
-          // update time
-          ws.connectTime = Date.now()
-
-          if (config.__loginfo__) logger!.info(`command received: ${payload}`)
-        })
-
-        ws.on("close", () => {
-          if (config.__web_auth__) dropSession(requestip)
-        })
-
-        ws.send(JSON.stringify({ CONFIG: _message }))
+      web.listen(config.__monitor_webserver_port__, hostServer, () => {
+        logger!.info(
+          `Web server is running on ${hostServer}:${config.__monitor_webserver_port__}`,
+        )
       })
-
-      try {
-        let hostServer: string = config.__localhost__
-        const web = http.createServer(this.requestListener)
-        this.webServer = web
-
-        web.on("error", (err: any) => {
-          logger!.error(`Web server error: ${err}`)
-        })
-
-        web.listen(config.__monitor_webserver_port__, hostServer, () => {
-          logger!.info(
-            `Web server is running on ${hostServer}:${config.__monitor_webserver_port__}`,
-          )
-        })
-      } catch (e: any) {
-        logger!.info(`Error in webserver creation: ${e.toString()}`)
-      }
     } catch (e: any) {
-      logger!.info(`Error creating WebSocketServer: ${e.toString()}`)
+      logger!.info(`Error in webserver creation: ${e.toString()}`)
     }
+  }
 
-    /**
-     * Download files
-     */
+  /** Download the data files, then parse them, seed the dashboard from the
+   *  persisted log (so early clients see the last-known traffic) and connect to xlxd. */
+  private downloadData() {
     const downloader = new FileDownloader()
 
     const envFiles: any[] = [
@@ -1281,9 +1462,6 @@ export class Monitor {
 
         this.parseXmlReflectorList()
 
-        // seed dashboard state from the persisted log so a client that connects
-        // before the first UDP datagram renders the last-known traffic
-
         try {
           const seed = this.createLogTableJson()
           this.jsonStr = {
@@ -1301,7 +1479,34 @@ export class Monitor {
         return false
       })
   }
+
+  /** Graceful shutdown: stop UDP, timers, WebSocket and HTTP servers. */
+  async shutdown(): Promise<void> {
+    this.stopClient()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.broadcastTimer) {
+      clearTimeout(this.broadcastTimer)
+      this.broadcastTimer = null
+    }
+    if (this.sessionSweeper) {
+      clearInterval(this.sessionSweeper)
+      this.sessionSweeper = null
+    }
+    try {
+      this.dashboardServer?.close()
+    } catch {}
+    await new Promise<void>((r) =>
+      this.webServer ? this.webServer.close(() => r()) : r(),
+    )
+  }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bootstrap
+// ─────────────────────────────────────────────────────────────────────────────
 
 logger = new Logger()
 crc16 = new Crc16()

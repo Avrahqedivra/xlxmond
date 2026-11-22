@@ -37,10 +37,11 @@ html, body {
   margin: 0;
 }
 
-.zoom {
-  transform: scale(1);
-  transform-origin: top center;
+.center-block {
+    margin: 0 auto;
+    width: fit-content;
 }
+
 
 /*Tabs*/
 #tabs {
@@ -294,6 +295,8 @@ a:active, .alink:active {
 }
 
 .zoom {
+  transform: scale(1);
+  transform-origin: top center;
   display: inline-block; 
   background-color: var(--color-menubar-zoombackground);
   border-radius: 6px;
@@ -747,7 +750,7 @@ color: #569cd6;
   font-weight: var(--color-fw-msmasters);
 }
 
-#masters tr {
+#masters, #peers tr {
   line-height: 1.8rem;
 }
 

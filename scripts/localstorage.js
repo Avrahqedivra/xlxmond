@@ -40,7 +40,7 @@ names["Jerã´me"] = "Jérôme"
 
 function adjustMenuLayoutStyle(f) {
   siteHeader.style.transform = "scale(" + zoomValue + ")"
-  siteHeader.style.marginTop = isFixed ?  "3.3rem":"0"
+  siteHeader.style.marginTop = isFixed ?  "5.0rem":"0"
   menubar.style.position = isFixed ? "fixed":"relative"
   lockbutton.classList.remove(isFixed ? "fa-lock-open":"fa-lock")
   lockbutton.classList.add(isFixed ? "fa-lock":"fa-lock-open")
