@@ -20,6 +20,7 @@
     "@types/xml2js": "^0.4"
   },
   "dependencies": {
+    "cheerio": "^1.0",
     "permessage-deflate": "^0.1",
     "typescript": "^5.1",
     "ws": "^8.17",

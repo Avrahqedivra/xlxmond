@@ -42,9 +42,12 @@ import { FileDownloader } from "./filedownloader.js"
 import { Logger } from "./logger.js"
 import { Crc16 } from "./crc16.js"
 
+import { scrapeListingTable, scrapeUrl } from "./scrap_modules.js"
+
 import * as config from "./config.js"
 import * as globals from "./globals.js"
 import * as sessionmgr from "./session.js"
+import { url } from "inspector/promises";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Exported state (public API)
@@ -696,6 +699,7 @@ export class Monitor {
   }
 
   getModules() {
+    // this.scrapModules();
     return JSON.parse(fs.readFileSync(`${config.__path__}assets/modules.json`, { encoding: "utf8", flag: "r" }))
   }
 
@@ -752,7 +756,6 @@ export class Monitor {
     switch (urlPath) {
       case "/":
       case "/index.html":
-        // case "/index_new.html":
         return sendResponse(
           res,
           200,
@@ -1388,9 +1391,10 @@ export class Monitor {
       this.sessionSweeper.unref()
     }
 
+    this.scrapModules()
+    this.downloadData()
     this.startDashboardServer()
     this.startWebServer()
-    this.downloadData()
   }
 
   /** https://manytools.org/hacker-tools/ascii-banner/ (rowan cap font) */
@@ -1418,6 +1422,28 @@ export class Monitor {
     logger!.info(
       `\nNDMonitor v${__version__} (c) 2023-26 Jean-Michel Cohen, F4JDN <f4jdn@outlook.fr>`,
     )
+  }
+
+  private scrapModules() {
+    logger!.info(
+      "\nLoading modules...",
+    )
+
+    scrapeUrl(`${config.__xlx_dashboard_url__}/index.php?show=modules`)
+      .then(payload => {
+        try {
+          fs.writeFileSync(
+            `${config.__path__}assets/modules.json`,
+            JSON.stringify(payload, null, 4),
+            { encoding: "utf-8", flag: "w" },
+          )
+        } catch (err: any) {
+          logger?.error(`Error writing ${config.__log_path__}xlxd.json: ${err}`)
+        }
+      })
+      .catch(err => {
+        console.error(err);
+      })
   }
 
   /** Create and start the HTTP server. */

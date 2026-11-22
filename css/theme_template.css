@@ -329,8 +329,13 @@ thead {
 .tables {
   margin-top: 1rem;
   width: var(--table-width);
+
+  tbody tr:nth-child(even) {
+    background-color: var(--color-trbg_bis);
+  }
 }
 #sysoptables .tables {
+
   width: var(--table-width);
 }
 .headerRow {
@@ -1293,6 +1298,7 @@ select {
   --color-table-fg: #000000;
   --color-table-border: #b0b0b0;
   --color-trbg: #f0f0f0;
+  --color-trbg_bis: #e4e4e4;
   --color-bg-headerRow: #5ea6f8;
   --color-fg-headerRow: #ffffff;
 
@@ -1457,6 +1463,7 @@ select {
   --color-table-fg: #ffffff;
   --color-table-border: #404040;
   --color-trbg: #1e1e1e;
+  --color-trbg_bis: #242424;
   --color-bg-headerRow: #37373d;
   --color-fg-headerRow: #ffffff;
 

@@ -14,6 +14,9 @@ export const __start_tot__: number              = 240                           
 
 export const __loginfo__: boolean               = false                                       // more log
 
+// keep alive 
+export const __keep_alive__: boolean            = false                                        // keep alive for udp socket to xlxd
+
 // how long the sitelogo should appear for the dashboard page in milliseconds
 export const __bannerDelay__: number            = 0
 
@@ -60,6 +63,7 @@ export const __log_path__: string               = './log/'                      
 
 export const __file_reload__: number            = 7                               // Number of days before we reload RAdioID database files
 
+export const __xlx_dashboard_url__: string = "https://xlx.reflector.net/"         // reflector url or 0.0.0.0 if local
 export const __reflectors_url__: string = "http://xlxapi.rlx.lu/api.php?do=GetReflectorList"
 export const __reflectors_file__: string = "reflectorlist.xml"
 

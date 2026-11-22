@@ -395,6 +395,7 @@ http://<server-ip>:7779?admin
 | `__monitor_webserver_port__` | `number` | `7779` | Dashboard HTTP web server port |
 | `__socketServerPort__` | `number` | `8003` | WebSocket streaming server port |
 | `__frequency__` | `number` | `10` | Update frequency push in seconds |
+| `__keep_alive__` | `boolean` | `false` | use keep alive |
 | `__displayLines__` | `number` | `10` | Number of rows shown in heard users table |
 | `__theme__` | `string` | `"light_theme"` | Default theme (`"light_theme"` or `"dark_theme"`) |
 | `__mod_filter__` | `string` | `""` | Comma-separated module letters to exclude (e.g. `"A,B"`) |
@@ -405,6 +406,7 @@ http://<server-ip>:7779?admin
 | `__web_secret_key__` | `string` | `"SECRET_KEY"` | Salt key used to generate user passcodes |
 | `__xlxdlog_file__` | `string` | `'/var/log/xlxd.xml'`| Path to XLXD XML log file |
 | `__file_reload__` | `number` | `7` | Days before redownloading RadioID user data |
+| `__xlx_dashboard_url__` | `string` | `'http(s)://current_standard_dashboard'` | (`127.0.0.1` if local, see XLXD_IP) |
 
 ---
 
