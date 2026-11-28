@@ -1,20 +1,14 @@
-/* latin-ext */
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(https://fonts.gstatic.com/s/publicsans/v7/ijwGs572Xtc6ZYQws9YVwllKVG8qX1oyOymuFpmJygcob18.woff2) format('woff2');
-  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* latin */
-@font-face {
-  font-family: 'Public Sans';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(https://fonts.gstatic.com/s/publicsans/v7/ijwGs572Xtc6ZYQws9YVwllKVG8qX1oyOymuFpmJxAco.woff2) format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+@import url('https://fonts.googleapis.com/css2?family=Michroma&family=Poppins:wght@400;500&display=swap');
+
+:root {
+    --font-poppins: 'Poppins', sans-serif;
+
+    --color-sitelogo-posX: 50%;
+    --color-sitelogo-posY: 45%;
+    --color-sitelogo-height: 16rem;
+
+    /* --map-tiles-filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7); */
+    --map-tiles-filter: none;
 }
 
 a::-webkit-scrollbar, select::-webkit-scrollbar {
@@ -29,8 +23,8 @@ a::-webkit-scrollbar, select::-webkit-scrollbar {
 
 html, body {
   font-size: var(--color-fz-html);
-  font-family: var(--color-font-html);
-  font-weight: bold;
+  font-family: var(--font-poppins);
+  /*font-weight: bold;*/
   background-color: var(--color-page);
   width:100%;
   height:100%;
@@ -1462,8 +1456,10 @@ select {
   --color-fw-table: normal;
   --color-table-fg: #ffffff;
   --color-table-border: #404040;
-  --color-trbg: #1e1e1e;
-  --color-trbg_bis: #242424;
+  
+  --color-trbg: rgba(12, 17, 20, 0.92);
+  --color-trbg_bis: rgba(15, 21, 25, 0.92);
+
   --color-bg-headerRow: #37373d;
   --color-fg-headerRow: #ffffff;
 

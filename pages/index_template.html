@@ -2,30 +2,49 @@
 <html class="__THEME__">
 
 <head>
-	<link rel="icon" type="image/x-icon" href="favicon.ico" />
 	<meta charset="UTF-8">
-	<meta http-equiv="refresh" content="20000"/>
+	<meta http-equiv="refresh" content="20000" />
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="description" content="Copyright (c) 2022 Jean-Michel Cohen - F4JDN" />
 	<title>XLXMOND</title>
 
+	<link rel="icon" type="image/x-icon" href="favicon.ico" />
 	<link rel="stylesheet" href="theme_template.css">
 	<link rel="stylesheet" href="mysite_template.css">
-	<meta name="description" content="Copyright (c) 2022 Jean-Michel Cohen - F4JDN" />
 
-		<style>
-			#insertPoint {
-				display: inline-block;
-			}
-			.tdleviapeer {
-				text-align: left;
-				padding-left: 0.5rem;
-			}
-			#insertModules {
-				top: 0;
-				padding-left: 1rem;
-				display: inline-block;
-				vertical-align: top;
-			}
-		</style>
+	<style>
+		#insertPoint { display: inline-block; }
+		#insertModules { top: 0; padding-left: 1rem; display: inline-block; vertical-align: top; }
+		.tdleviapeer { text-align: left; padding-left: 0.5rem; }
+
+
+.tx-icon { width: 13px; height: 13px; color: #22c55e; }
+  .tx-icon .arc {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center bottom;
+    animation: transmit 1.8s ease-in-out infinite;
+  }
+  .tx-icon .arc1 { animation-delay: 0s;    }
+  .tx-icon .arc2 { animation-delay: 0.35s; }
+  .tx-icon .arc3 { animation-delay: 0.7s;  }
+  .tx-icon .dot  { fill: currentColor; animation: blink 1.8s ease-in-out infinite; }
+
+  @keyframes transmit {
+    0%   { opacity: 0; transform: scale(0.6); }
+    20%  { opacity: 1; transform: scale(1);   }
+    100% { opacity: 0; transform: scale(1.05);}
+  }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tx-icon .arc, .tx-icon .dot { animation: none; opacity: 1; }
+  }
+	</style>
 </head>
 
 <body>
@@ -42,591 +61,763 @@
 			</div>
 			<div id="footer">
 				__FOOTER__
-			</div> 
+			</div>
 			<!--THIS COPYRIGHT NOTICE MUST BE DISPLAYED AS A CONDITION OF THE LICENCE GRANT FOR THIS SOFTWARE. ALL DERIVATEIVES WORKS MUST CARRY THIS NOTICE -->
 		</div>
 	</div>
-</body>
 
 <script type="text/javascript">
-	var sock = null;
-	var displayLines = parseInt("__DISPLAY_LINES__");
-	
-	hideAllMod = false;
-	traffic = [];
-	modfilter = new Set("__MOD_FILTER__".split(','));
-	modorder = new Set("__MOD_ORDER__".split(','));
-	modhilite = new Set("__MOD_HILITE__".split(','));
-	dynamic_mod = ("__DYNAMIC_MOD__" == "true") ? true : false;
-	moduleNumber = "__MOD_NUMBER__";
-	moduleNames = JSON.parse('__MOD_NAMES__');
+/* ==================================================================
+ * 1. GLOBALS
+ *    Kept as top-level `var`: external scripts (button bar, theme,
+ *    settings) read or write several of these.
+ * ================================================================== */
+var sock = null;
+var socket = null;
+var displayLines = parseInt("__DISPLAY_LINES__");
 
-	//  https://stackoverflow.com/questions/9229645/remove-duplicate-values-from-js-array
-	// 	traffic = uniqByKeepLast(traffic, rec => rec.CALLSIGN);
+var hideAllMod = false;
+var traffic = [];
+var nodes = null;
+var cleaned = false;
+var modfilter = new Set("__MOD_FILTER__".split(','));
+var modorder = new Set("__MOD_ORDER__".split(','));
+var modhilite = new Set("__MOD_HILITE__".split(','));
+var dynamic_mod = "__DYNAMIC_MOD__" === "true";
+var moduleNumber = "__MOD_NUMBER__";
+var moduleNames = JSON.parse('__MOD_NAMES__');
 
-	function keepLastRecordForEachModule(t) {
-		let seen = new Set()
-		var callsign = ''
-		var suffix = ''
+var TIME_INTERVALS = 24;
+var doApplyConfig = true;
+var reflector = "";
+var version = "";
+var listeners = 0;
+var urlCache = {};
+var startTot = parseInt("__START_TOT__") || 240;   /* max seconds for one transmission */
+var bannerDelay = parseInt("__BANNER_DELAY__");
+var mobileDevice = "__MOBILE__" === "true";
+var ticker = null;                                  /* handle of the single 1 s interval */
+var statusCountdown = 0;
 
-		return t.filter(item => {
-			callsign = item.Callsign.trim()
-			var index = callsign.indexOf("/");
-			if (index != -1) {
-					suffix = callsign.substring(index+1).trim();
-					callsign = callsign.substring(0, index).trim();
-			}
+/* bg class of the last traffic row; the linked-nodes table reuses it */
+var lastBgClass = 'tgWhite';
 
-			let k = callsign+item.OnModule
-			return seen.has(k) ? false : seen.add(k);
-		})
+/* ==================================================================
+ * 2. SMALL HELPERS
+ * ================================================================== */
+var HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+const txIcon = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
+     style="height:16px;margin:4px 0.25rem 0;color:#e52713"
+     role="img" aria-label="Transmitting">
+  <g transform="rotate(90 32 32)" fill="none" stroke="currentColor"
+     stroke-width="6" stroke-linecap="round">
+    <circle cx="32" cy="50" r="4" fill="currentColor" stroke="none">
+      <animate attributeName="opacity" values="1;0.35;1"
+               dur="1.8s" repeatCount="indefinite"/>
+    </circle>
+    <path d="M20 42 A 17 17 0 0 1 44 42">
+      <animate attributeName="opacity" values="0;1;0"
+               dur="1.8s" begin="0s" repeatCount="indefinite"/>
+    </path>
+    <path d="M13 35 A 27 27 0 0 1 51 35">
+      <animate attributeName="opacity" values="0;1;0"
+               dur="1.8s" begin="0.35s" repeatCount="indefinite"/>
+    </path>
+    <path d="M6 28 A 37 37 0 0 1 58 28">
+      <animate attributeName="opacity" values="0;1;0"
+               dur="1.8s" begin="0.7s" repeatCount="indefinite"/>
+    </path>
+  </g>
+</svg>`;
+
+function escapeHtml(value) {
+	return String(value).replace(/[&<>"']/g, function (c) { return HTML_ESCAPES[c]; });
+}
+
+function padTo2Digits(num) {
+	return num.toString().padStart(2, '0');
+}
+
+/* seconds -> mm:ss */
+function formatTicker(seconds) {
+	return padTo2Digits(Math.floor(seconds / 60) % 60) + ":" + padTo2Digits(seconds % 60);
+}
+
+function log(msg) {
+	// console.log(msg);
+}
+
+function getModuleFancyName(letter) {
+	return moduleNames[letter] === undefined ? "Reserved" : moduleNames[letter];
+}
+
+function flagFor(callsign) {
+	return getFlag(callsign) || "shield.png";
+}
+
+/* "F4JDN/P" -> { base: "F4JDN", suffix: "P" } */
+function splitSlash(raw) {
+	var callsign = String(raw).trim();
+	var index = callsign.indexOf("/");
+	if (index === -1)
+		return { base: callsign, suffix: "" };
+	return { base: callsign.substring(0, index).trim(), suffix: callsign.substring(index + 1).trim() };
+}
+
+/* one comparison rule used everywhere: base callsign, case-insensitive */
+function sameCall(a, b) {
+	return splitSlash(a).base.toUpperCase() === splitSlash(b).base.toUpperCase();
+}
+
+/* keeps the first (= most recent) record of each base callsign + module */
+function keepFirstRecordForEachCallsignModule(list) {
+	var seen = new Set();
+	return list.filter(function (item) {
+		var key = splitSlash(item.Callsign).base.toUpperCase() + "|" + item.OnModule;
+		if (seen.has(key))
+			return false;
+		seen.add(key);
+		return true;
+	});
+}
+
+/* ==================================================================
+ * 3. TALK-TIME TRACKING
+ *
+ *   talkState[module]  current or last transmission on that module:
+ *                      { callsign, start (ms), end (ms | null) }
+ *   lastTalk[key]      seconds of the last completed transmission
+ *   totalTalk[key]     seconds talked today
+ *   key = "BASECALL|module"
+ *
+ *   Durations are always computed from timestamps, never by counting
+ *   ticks, so background-tab throttling cannot make them drift.
+ * ================================================================== */
+var STORE_KEY = "xlxmond.talk.v1";
+var talkState = {};
+var lastTalk = {};
+var totalTalk = {};
+var statsDay = "";
+
+function todayString() {
+	var d = new Date();
+	return d.getFullYear() + "-" + padTo2Digits(d.getMonth() + 1) + "-" + padTo2Digits(d.getDate());
+}
+
+function talkKey(callsign, mod) {
+	return splitSlash(callsign).base.toUpperCase() + "|" + mod;
+}
+
+function talkElapsed(state) {
+	return Math.max(0, Math.floor(((state.end || Date.now()) - state.start) / 1000));
+}
+
+function loadTalkStats() {
+	statsDay = todayString();
+	try {
+		var raw = localStorage.getItem(STORE_KEY);
+		if (!raw)
+			return;
+		var saved = JSON.parse(raw);
+		/* lastTalk is intentionally NOT restored: the TX column only shows
+		   transmissions measured since this page was loaded */
+		totalTalk = saved.day === statsDay ? (saved.total || {}) : {};
+	} catch (e) {
+		log(e);
 	}
+}
 
-	function uniqByKeepFirst(a, key) {
-		let seen = new Set();
-		return a.filter(item => {
-			let k = key(item).trim;
-			return seen.has(k) ? false : seen.add(k);
-		})
+function saveTalkStats() {
+	try {
+		localStorage.setItem(STORE_KEY, JSON.stringify({ day: statsDay, total: totalTalk }));
+	} catch (e) {
+		log(e);
 	}
+}
 
-	function uniqByKeepLast(a, key) {
-		return [
-			...new Map(
-				a.map(x => [key(x), x])
-			).values()
-		]
+/* module where this callsign is currently transmitting, or null */
+function activeModuleOf(callsign) {
+	var mods = Object.keys(talkState);
+	for (var i = 0; i < mods.length; i++) {
+		var s = talkState[mods[i]];
+		if (!s.end && sameCall(s.callsign, callsign))
+			return mods[i];
 	}
+	return null;
+}
 
-	function padTo2Digits(num) {
-  	return num.toString().padStart(2, '0');
+function stopTalk(callsign, mod) {
+	var s = talkState[mod];
+	if (!s || s.end || !sameCall(s.callsign, callsign))
+		return;
+
+	s.end = Date.now();
+	var seconds = talkElapsed(s);
+	var key = talkKey(callsign, mod);
+
+	if (todayString() !== statsDay) {
+		statsDay = todayString();
+		totalTalk = {};
 	}
-
-	function getModuleFancyName(letter) {
-		if (moduleNames[letter] == undefined)
-			return "Reserved";
-
-		return moduleNames[letter];
-	}
-
-	function setCurrentTicker(module) {
-		for(let i=0; i<tickerModule.length; i++) {
-			if (tickerModule[i].module == module) {
-				var elements = document.getElementsByClassName("ticker" + tickerModule[i].module)
-				if (elements != null && elements.length > 0) {
-					var value = new Date(tickerModule[i].delay * 1000).toISOString().slice(14, 19)
-					for(let j=0; j<elements.length; j++) {
-						elements[j].innerHTML = value
-					}
-				}
-
-				break
-			}
-		}
-	}
-
-	function doTraffic(data) {
-		if (data != null) {
-			var bgClass = 'tgWhite';
-
-			if (data["HeardUsers"] != null && data["HeardUsers"]["Station"] != null) {
-				if (reflector == "" &&  data["HeardUsers"]["Reflector"] != null)
-					reflector = data["HeardUsers"]["Reflector"];
-
-				if (!Array.isArray(data["HeardUsers"]["Station"]))
-					data["HeardUsers"]["Station"] = [data["HeardUsers"]["Station"]];
-
-				traffic = keepLastRecordForEachModule(data["HeardUsers"]["Station"])
-			}
-
-			if (version == "" &&  data["Version"] != null) {
-				version = data["Version"];
-				if (el = document.getElementById("infoLine"))
-					el.textContent = reflector + " v" + version + " - Dashboard v1.1.0";
-			}
-
-			let trafficLength = traffic.length;
-
-			if (trafficLength > 0) {
-				var modarray = [];
-
-				cleaned = true;
-
-				for (let i = 0; i < trafficLength; i++) {
-					var record = traffic[i];
-					var moduleNode = record.OnModule;
-
-					// skip excluded modules
-					if (modfilter.has(moduleNode))
-						continue;
-
-					// add dynamic allowed modules
-					if ([...modorder][0] != "" && !modorder.has(moduleNode)) {
-						if (dynamic_mod === false)
-							continue;
-
-						modorder.add(moduleNode);
-					}
-
-					if (modarray[moduleNode] == null) {
-						modarray[moduleNode] = "";
-						$("#xlxd" + moduleNode + " tr").remove();
-					}
-					
-					var date = new Date(Date.parse(record["LastHeardTime"]));
-					record["DATE"] = date.getFullYear() +'-'+ padTo2Digits(date.getMonth()+1) + '-' + padTo2Digits(date.getDate())
-					record["TIME"] = padTo2Digits(date.getHours())+":"+padTo2Digits(date.getMinutes())+":"+padTo2Digits(date.getSeconds())
-
-					var callsign = record.Callsign.trim();
-
-					var index = callsign.indexOf("/");
-					if (index != -1) {
-							suffix = callsign.substring(index+1).trim();
-							callsign = callsign.substring(0, index).trim();
-					}
-
-					var viaNode = record.ViaNode;
-					var viaPeer = record.ViaPeer;
-					var suffix = "";
-					var date = "";
-					var delay = 0;
-
-					if (record.Packet === "END") {
-						for(let r=0; r<tickerModule.length; r++) {
-							if (tickerModule[r].module == moduleNode) {
-								delay = tickerModule[r].delay
-
-								if (delay < 2)
-									delay = "PTT"
-								break;
-							}
-						}
-						
-						if (delay == 0)
-							delay = 'N/A'
-
-						record["Delay"] = delay
-					}
-
-					// check dead
-					if (record.Packet === "START") {
-						delay = 0
-						record["Delay"] = delay
-
-						// var tt = new Date(record.DATE + " " + record.TIME);
-						// // if START gone past TOT change to end
-						// if ((Date.now() - tt.getTime()) / 1000 > startTot) {
-						// 		record.Packet = "END";
-						// 		record.Delay = startTot;
-						// }
-					}
-
-					// console.log("xxxx '" + callsign + "' '" + data["onair"] + "'")
-
-					var flagUrl = getFlag(callsign);
-					if (flagUrl == "")
-						flagUrl = "shield.png";
-
-					var ViaPeer = "";
-					if (viaNode != "")
-						ViaPeer = viaNode;
-					
-					if (viaPeer != "")
-						ViaPeer += (" / " + viaPeer);
-
-					var modName = "modId" + moduleNode;
-
-					if (modhilite.has(moduleNode))
-						bgClass = 'tgWhite';
-					else
-						bgClass = 'tgGreen';
-
-					/* check if table already exists */
-					if (document.getElementById(modName) == null) {
-						var emptyTable = "";
-
-						emptyTable = '<table id=tb' + modName + ' class="tgtable tables network tablefixed">' +
-							'<thead id="' + modName + '" modid="' + moduleNode + '" tbodyid=xlxd' + moduleNode + '">' +
-								'<tr class="headerRow">' +
-								'<th class="thleorder">#</th>' +
-								'<th class="thledate">Date</th>' +
-								'<th class="thletime" id="heure">Time</th>' +
-								'<th class="thlename">Callsign</th>' +
-								'<th class="thlesuffix">Suffix</th>' +
-								'<th class="thleear">Mod</th>' +
-								'<th class="thledprs">DPRS</th>' +
-								'<th class="thledelay">TX (s)</th>' +
-								'<th class="thleviapeer">Via / Peer</th>' +
-								'</tr>' +
-							'</thead>' +
-							'<tbody id="xlxd' + moduleNode + '"></tbody></table>';
-
-						/* insert new table into mod tables area regarding modorder */
-						if (document.getElementById("mod" + moduleNode + "marker") != null)
-							$(emptyTable).insertBefore("#mod" + moduleNode + "marker");
-						else
-							$('#insertPoint').append(emptyTable);
-					}
-
-					var rows = (modarray[moduleNode].match(/\<tr/g) || []).length;
-
-					if (rows < displayLines) {
-					//if (document.getElementById("xlxd"+moduleNode).rows.length < displayLines) {
-						content = '<tr class=' + bgClass + '>';
-							
-						if (record.Packet === "START")
-							content += "<td class=''><img style='height:13px;margin: 0.25rem 0.5rem 0' src='tx.gif'/></td>";
-						else
-							content += "<td class='tdOrder'>" + (i+1) + "</td>";
-
-						content += "<td class='date'>" + record.DATE + "</td>";
-						content += "<td class='time'>" + record.TIME + "</td>";
-						content += "<td class='callsign ellipsis'><img class='modflag' src='" + flagUrl + "'/><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsign + "</a></td>";
-						content += "<td class='tdlesuffix'>" + suffix + "</td>";
-						content += "<td moduleNode=" + moduleNode + " class='ear'>" + moduleNode + "</td>";
-						content += "<td class='dprs'><a target='_blank' href=http://www.aprs.fi/" + callsign + "><img src='" + flag64["sat"] + "'/></a></td>";
-
-						if (record.Packet === "START") {
-							addTicker(record);
-							content += "<td class='online'><div class='ticker" + record.OnModule + "'>00:00</div></td>";
-						} else {
-							if (record.Packet === "END") {
-								deleteTicker(record);
-								content += "<td class='delay'>" + ((delay != undefined) ? delay : "") + "</td>";
-							}
-							else
-								content += "<td class='online'></td>";
-						}
-
-						content += "<td class='tdleviapeer'>" + ViaPeer + "</td>";
-						content += "</tr>";
-
-						modarray[moduleNode] += content;
-					}
-				}
-
-				Object.keys(modarray).forEach(moduleNode => {
-					$("#xlxd" + moduleNode).append(modarray[moduleNode]);
-				});
-			}
-
-			if (data["LinkedNodes"] != null && data["LinkedNodes"]["Nodes"] != null)
-				nodes = data["LinkedNodes"]["Nodes"];
-
-			if (nodes) {
-				if (!Array.isArray(nodes))
-					nodes = [nodes];
-
-				let nodesLength = nodes.length;
-
-				if (nodesLength > 0) {
-					cleaned = true;
-					nodes.sort((a, b) => {
-						x = a.LinkedModule;
-						y = b.LinkedModule;
-
-						return x < y ? -1 : x > y ? 1 : 0;
-					});
-
-					$("#tbmodules").remove();
-
-					var modules = [];
-					var biggest = 0;
-
-					var emptyTable = "<table id='tbmodules' class='tgtable tables network tablefixed'><thead><tr class='headerRow'>";
-					for (let i = 0; i < nodesLength; i++) {
-						var record = nodes[i];
-
-						// skip excluded modules
-						if (modfilter.has(record.LinkedModule))
-							continue;
-
-						if (modules[record.LinkedModule] == null) {
-							modules[record.LinkedModule] = [];
-							emptyTable += "<th class='thlename'>" + getModuleFancyName(record.LinkedModule) + "<br>" +  record.LinkedModule + "</th>";
-						}
-							
-						modules[record.LinkedModule].push({ callsign: record.Callsign.trim() });
-						biggest = Math.max(biggest, modules[record.LinkedModule].length);
-					}
-
-					emptyTable += "</tr></thead><tbody id='bodymodules'></tbody></table>";
-
-					$('#insertModules').append(emptyTable);
-
-					emptyTable = "";
-					for(let i=0; i < biggest; i++) {
-						emptyTable = "<tr class=" + bgClass + ">";
-						Object.keys(modules).forEach(key => {
-							var suffix = "";
-							var flagUrl = "";
-							var callsignex = "";
-
-							if ((callsign = modules[key][i]) == null)
-								callsign = "";
-							else {
-								callsign = modules[key][i].callsign;
-							
-								var index = callsign.indexOf(" ");
-								if (index != -1) {
-									suffix = callsign.substring(index+1).trim();
-									callsign = callsign.substring(0, index).trim();
-								}
-
-								flagUrl = getFlag(callsign);
-								if (flagUrl == "")
-									flagUrl = "shield.png";
-
-								if (suffix != "")
-									callsignex = callsign + "-" + suffix;
-								else
-									callsignex = callsign;
-							}
-
-							if (flagUrl != "")
-								emptyTable += "<td class='callsign ellipsis'><img class='modflag' src='" + flagUrl + "'/><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsignex + "</a></td>";
-							else
-								emptyTable += "<td class='callsign ellipsis'><a target='_blank' href=https://qrz.com/db/" + callsign + ">" + callsignex + "</a></td>";
-						});
-						emptyTable += "</tr>";
-						$("#bodymodules").append(emptyTable);
-					}
-				}
-			}
-		}
-	}
-
-	function updateTime() {
-		if (document.getElementById("heure")) {
-			var now = new Date();
-			var hours = now.getHours();
-			var minutes = now.getMinutes();
-			var seconds = now.getSeconds();
-			
-			// Pad single digits with leading zeros
-			hours = (hours < 10 ? "0" : "") + hours;
-			minutes = (minutes < 10 ? "0" : "") + minutes;
-			seconds = (seconds < 10 ? "0" : "") + seconds;
-			
-			var timeString = hours + ":" + minutes + ":" + seconds;
-			
-			document.getElementById("heure").textContent = timeString;
-		}
-	}
-
-	function checkDeadTicker() {
-		if (ticker != null) {
-			for(let i=tickerModule.length-1; i >= 0; i--) {
-				if (tickerModule[i].delay > startTot) {
-					// console.log("deleting dead ticker for module " + tickerModule[i].module);
-					tickerModule.splice(i, 1);
-				}
-			}
-		}
-	}
-
-	function deleteTicker(record) {
-		if (ticker != null) {
-			for(let i=0; i<tickerModule.length; i++) {
-				if (tickerModule[i].module == record.OnModule) {
-					console.log("deleting ticker for module " + record.OnModule);
-					tickerModule.splice(i, 1);
-					break;
-				}
-			}
-		}
-	}
-
-	function addTicker(record) {
-		if (ticker != null) {
-			console.log("adding ticker for module " + record.OnModule);
-
-			for(let i=0; i<tickerModule.length; i++) {
-				if (tickerModule[i].module == record.OnModule)
-					return;
-			}
-
-			tickerModule.push({ "module": record.OnModule, "start": Date.now(), "delay": 0 });
-		}
-	}
-
-	function log(msg) {
-		console.log(msg);
-	}
-
-	$(document).ready(function () {
-		TIME_INTERVALS = 24
-		
-		// document ready occurs before windows.onLoad
-		if (getConfigFromLocalStorage != null) {
-			getConfigFromLocalStorage();
-
-			if (document.documentElement.className != settings[0].config.theme)
-					document.documentElement.className = settings[0].config.theme;
-		}
-
-		document.cookie = "SameSite=None; Secure"
-
-		initMenubar();
-	})
-
-	window.onload = () => {
-		doApplyConfig = true;
-		reflector = "";
-		version = "";
-		listeners = 0;
-		urlCache = {}
-		startTot = parseInt("__START_TOT__"); if (startTot == 0) startTot = 240;
-		bannerDelay = parseInt("__BANNER_DELAY__");
-		mobileDevice = "__MOBILE__" == "true";
-
-		ticker = null;
-		tickerModule = [];
-		statusCountdown = 0
-
-		var wsuri = "ws://" + window.location.hostname + ":__SOCKET_SERVER_PORT__?page=dashboard";
-
-		if (isNaN(displayLines))
-			displayLines = 10;
-
-		document.getElementById("menuSearch").style.display = "inline-block";	
-
-		// don't show banner if already done within 3600s
-		if (true || bannerDelay == 0 || (Math.floor(Date.now() - settings[0].config.last) / 1000) < 3600) {
-			$("#menubar").show();
-			$("#siteHeader").show();
-			$("#freqstatsdiv").show()
-		}
-		else 
-		{
-			$("#sitelogo").show();
-
-			setTimeout(() => {
-				$("#sitelogo").hide()
-				$("#menubar").show()
-				$("#siteHeader").show()
-				$("#freqstatsdiv").show()
-
-				// reset settings timer 
-				saveSettings();
-			}, bannerDelay);
-		}
-
-		modorder.forEach(moduleNode => {
-			$("#insertPoint").append($("<div id='mod" + moduleNode + "marker'></div>"));
-		});
-
-		if (hideAllMod)
-			$("#insertPoint").hide();
-		else
-			$("#insertPoint").show();
-
-		function WSConnection() {
-			'use strict';
-			this.socket = {};
-		}
-
-		WSConnection.prototype.connect = (url) => {
-			'use strict';
-
-			return new Promise((resolve, reject) => {
-				if ("WebSocket" in window)
-					this.socket = new WebSocket(url);
-				else if ("MozWebSocket" in window)
-					this.socket = new MozWebSocket(url);
-				else {
-					log("Browser does not support WebSocket!");
-					resolve();
-				}
-
-				this.socket.onopen = () => {
-					log("Connected to " + url)
-
-					ticker = setInterval(() => {
-						// Update the time every second
-						updateTime();
-
-						for(let i=0; i<tickerModule.length; i++) {
-							tickerModule[i].delay++
-
-							var elements = document.getElementsByClassName("ticker" + tickerModule[i].module)
-							if (elements != null && elements.length > 0) {
-								var value = new Date(tickerModule[i].delay * 1000).toISOString().slice(14, 19)
-								for(let j=0; j<elements.length; j++) {
-									elements[j].innerHTML = value
-									break
-								}
-							}
-						}
-					}, 1000)
-
-					resolve()
-				}
-
-				this.socket.onmessage = (e) => {
-					var data = null;
-
-					try {
-						if (themeSettings == "auto")
-							adjustTheme();
-
-						data = JSON.parse(e.data);
-
-						if (data != null) {
-							if (data.BIGEARS)
-								$("#btnlisteners").text(data.BIGEARS)
-
-							// FIRST PACKET IS CONFIG
-							if (data.CONFIG) {
-								if (data.CONFIG.BIGEARS)
-									$("#btnlisteners").text(data.BIGEARS);
-
-								if (data.CONFIG.PACKETS)
-									doTraffic(data.CONFIG.PACKETS.TRAFFIC);
-							} else {
-								if (data.TRAFFIC)
-									doTraffic(data.TRAFFIC);
-
-								if (data.STATUS)
-									log(data.STATUS);
-							}
-
-							if (themeSettings == "auto")
-								adjustTheme();
-
-							if (doApplyConfig) {
-								doApplyConfig = false;
-								applyConfig();
-							}
-					}
-					} catch (error) {
-						log(error);
-					}
-				}
-
-				socket.onerror = function (error) {
-					console.log('WebSocket error: ' + error);
-					reject(error);
-				};
-
-				socket.onclose = function (e) {
-					log("Connection closed (wasClean = " + e.wasClean + ", code = " + e.code + ", reason = '" + e.reason + "')");
-					this.sock = null;
-				};
-			});
-		};
-
-		WSConnection.prototype.disconnect = () => {
-			'use strict';
-			console.log("Disconnect request from local app layer");
-			this.socket.close();
-		};
-
-
-		setTimeout(() => {
-			socket = new WSConnection().connect(wsuri);
-		}, 250);
+	lastTalk[key] = seconds;
+	totalTalk[key] = (totalTalk[key] || 0) + seconds;
+	saveTalkStats();
+	log("talk end " + key + " " + seconds + "s");
+}
+
+function startTalk(callsign, mod, alreadyElapsedSec) {
+	var s = talkState[mod];
+
+	/* idempotent: same talker already running on this module */
+	if (s && !s.end && sameCall(s.callsign, callsign))
+		return;
+
+	/* someone else was on this module: close that transmission */
+	if (s && !s.end)
+		stopTalk(s.callsign, mod);
+
+	/* a station can only transmit on one module at a time */
+	var other = activeModuleOf(callsign);
+	if (other !== null && other !== mod)
+		stopTalk(callsign, other);
+
+	talkState[mod] = {
+		callsign: splitSlash(callsign).base,
+		start: Date.now() - (alreadyElapsedSec || 0) * 1000,
+		end: null
 	};
+	log("talk start " + talkKey(callsign, mod));
+}
+
+function stopAllTalks() {
+	Object.keys(talkState).forEach(function (mod) {
+		var s = talkState[mod];
+		if (!s.end)
+			stopTalk(s.callsign, mod);
+	});
+}
+
+/* single page-wide timer callback */
+function tickAll() {
+	updateTime();
+
+	Object.keys(talkState).forEach(function (mod) {
+		var s = talkState[mod];
+		if (s.end)
+			return;
+
+		/* safety net: an END packet was missed */
+		if (talkElapsed(s) > startTot) {
+			stopTalk(s.callsign, mod);
+			return;
+		}
+
+		var text = formatTicker(talkElapsed(s));
+		document.querySelectorAll('.ticker[data-mod="' + mod + '"]').forEach(function (el) {
+			el.textContent = text;
+		});
+	});
+}
+
+function updateTime() {
+	var now = new Date();
+	var text = padTo2Digits(now.getHours()) + ":" + padTo2Digits(now.getMinutes()) + ":" + padTo2Digits(now.getSeconds());
+	var cells = document.querySelectorAll("th.thletime");
+	for (var i = 0; i < cells.length; i++)
+		cells[i].textContent = text;
+}
+
+/* read-only access to the stats from the console or other scripts */
+window.getTalkStats = function () {
+	return { day: statsDay, last: lastTalk, total: totalTalk, active: talkState };
+};
+
+/* ==================================================================
+ * 4. START / END EVENT HANDLING
+ *    Runs before rendering. Rendering has no side effects.
+ * ================================================================== */
+var pendingStart = null;          /* { callsign, ts }: START not yet matched to a module */
+var lastEventSig = "";
+var PENDING_TTL = 5000;           /* ms to wait for the heard list to catch up */
+
+/* module where this callsign was heard most recently */
+function resolveModule(callsign) {
+	var best = null, bestTime = -1;
+	for (var i = 0; i < traffic.length; i++) {
+		var r = traffic[i];
+		if (modfilter.has(r.OnModule) || !sameCall(r.Callsign, callsign))
+			continue;
+		var t = Date.parse(r.LastHeardTime) || 0;
+		if (t > bestTime) {
+			bestTime = t;
+			best = r.OnModule;
+		}
+	}
+	return best;
+}
+
+function processTalker(talker) {
+	var now = Date.now();
+
+	/* 1. retry a START that could not be matched earlier */
+	if (pendingStart) {
+		if (now - pendingStart.ts > PENDING_TTL) {
+			pendingStart = null;
+		} else {
+			var m = resolveModule(pendingStart.callsign);
+			if (m) {
+				startTalk(pendingStart.callsign, m, 0);
+				pendingStart = null;
+			}
+		}
+	}
+
+	if (!talker || !talker.callsign)
+		return;
+
+	/* 2. ignore repeats of the event just handled */
+	var sig = talker.packet + "|" + talker.callsign;
+	if (sig === lastEventSig)
+		return;
+	lastEventSig = sig;
+
+	if (talker.packet === "START") {
+		var mod = talker.module || resolveModule(talker.callsign);
+		if (mod)
+			startTalk(talker.callsign, mod, 0);
+		else
+			pendingStart = { callsign: talker.callsign, ts: now };
+
+	} else if (talker.packet === "END") {
+		/* key-up too short to ever be matched */
+		if (pendingStart && sameCall(pendingStart.callsign, talker.callsign))
+			pendingStart = null;
+
+		var amod = talker.module || activeModuleOf(talker.callsign);
+		if (amod)
+			stopTalk(talker.callsign, amod);
+	}
+}
+
+/* ==================================================================
+ * 5. RENDERING: heard-users tables
+ * ================================================================== */
+function buildModuleTable(modName, moduleNode) {
+	return '<table id="tb' + modName + '" class="tgtable tables network tablefixed">' +
+		'<thead id="' + modName + '" modid="' + moduleNode + '" tbodyid="xlxd' + moduleNode + '">' +
+		'<tr class="headerRow">' +
+		'<th class="thleorder">#</th>' +
+		'<th class="thledate">Date</th>' +
+		'<th class="thletime" id="heure">Time</th>' +
+		'<th class="thlename">Callsign</th>' +
+		'<th class="thlesuffix">Suffix</th>' +
+		'<th class="thleear">Mod</th>' +
+		'<th class="thledprs">DPRS</th>' +
+		'<th class="thledelay">TX (s)</th>' +
+		'<th class="thleviapeer">Via / Peer</th>' +
+		'</tr></thead>' +
+		'<tbody id="xlxd' + moduleNode + '"></tbody></table>';
+}
+
+function ensureModuleTable(moduleNode) {
+	var modName = "modId" + moduleNode;
+	if (document.getElementById(modName) != null)
+		return;
+
+	var html = buildModuleTable(modName, moduleNode);
+	/* insert regarding modorder */
+	if (document.getElementById("mod" + moduleNode + "marker") != null)
+		$(html).insertBefore("#mod" + moduleNode + "marker");
+	else
+		$('#insertPoint').append(html);
+}
+
+/* TX-time cell: live counter while talking, last duration afterwards */
+function buildDelayCell(record, moduleNode, live) {
+	if (live) {
+		return '<td class="online"><div class="ticker" data-mod="' + escapeHtml(moduleNode) + '">' +
+			formatTicker(talkElapsed(talkState[moduleNode])) + '</div></td>';
+	}
+
+	var key = talkKey(record.Callsign, moduleNode);
+	var last = lastTalk[key];
+	if (last === undefined)
+		return '<td><div class="delay"></div></td>';
+
+	var total = totalTalk[key];
+	var title = total !== undefined ? ' title="Total today: ' + formatTicker(total) + '"' : '';
+	return '<td' + title + '><div class="delay">' + (last < 2 ? "PTT" : formatTicker(last)) + '</div></td>';
+}
+
+function buildTrafficRow(order, record, callsign, bgClass) {
+	var moduleNode = record.OnModule;
+	var viaPeer = record.ViaNode !== "" ? record.ViaNode : "";
+	if (record.ViaPeer !== "")
+		viaPeer += " / " + record.ViaPeer;
+
+	var s = talkState[moduleNode];
+	var live = !!(s && !s.end && sameCall(s.callsign, record.Callsign));
+	var safeCall = escapeHtml(callsign);
+
+	var html = '<tr class=' + bgClass + '>';
+
+	html += live
+  ? "<td class=''>" + txIcon + "</td>"
+  : "<td class='tdOrder'>" + order + "</td>";
+
+	html += "<td class='date'>" + record.DATE + "</td>";
+	html += "<td class='time'>" + record.TIME + "</td>";
+	html += "<td class='callsign ellipsis'><img class='modflag' src='" + flagFor(callsign) + "'/>" +
+		"<a target='_blank' href='https://qrz.com/db/" + safeCall + "'>" + safeCall + "</a></td>";
+	/* the suffix cell has always been empty in the original page */
+	html += "<td class='tdlesuffix'></td>";
+	html += "<td moduleNode=" + escapeHtml(moduleNode) + " class='ear'>" + escapeHtml(moduleNode) + "</td>";
+	html += "<td class='dprs'><a target='_blank' href='http://www.aprs.fi/" + safeCall + "'><img src='" + flag64["sat"] + "'/></a></td>";
+	html += buildDelayCell(record, moduleNode, live);
+	html += "<td class='tdleviapeer'>" + escapeHtml(viaPeer) + "</td></tr>";
+	return html;
+}
+
+function renderTraffic() {
+	var rowsHtml = {};
+	var rowCount = {};
+	cleaned = true;
+
+	for (var i = 0; i < traffic.length; i++) {
+		var record = traffic[i];
+		var moduleNode = record.OnModule;
+
+		/* skip excluded modules */
+		if (modfilter.has(moduleNode))
+			continue;
+
+		/* add dynamic allowed modules */
+		if ([...modorder][0] != "" && !modorder.has(moduleNode)) {
+			if (dynamic_mod === false)
+				continue;
+			modorder.add(moduleNode);
+		}
+
+		if (rowsHtml[moduleNode] === undefined) {
+			rowsHtml[moduleNode] = "";
+			rowCount[moduleNode] = 0;
+			$("#xlxd" + moduleNode + " tr").remove();
+		}
+
+		if (rowCount[moduleNode] >= displayLines)
+			continue;
+
+		var date = new Date(Date.parse(record.LastHeardTime));
+		record.DATE = date.getFullYear() + '-' + padTo2Digits(date.getMonth() + 1) + '-' + padTo2Digits(date.getDate());
+		record.TIME = padTo2Digits(date.getHours()) + ":" + padTo2Digits(date.getMinutes()) + ":" + padTo2Digits(date.getSeconds());
+
+		lastBgClass = modhilite.has(moduleNode) ? 'tgWhite' : 'tgGreen';
+
+		ensureModuleTable(moduleNode);
+
+		rowCount[moduleNode]++;
+		rowsHtml[moduleNode] += buildTrafficRow(rowCount[moduleNode], record, splitSlash(record.Callsign).base, lastBgClass);
+	}
+
+	Object.keys(rowsHtml).forEach(function (moduleNode) {
+		$("#xlxd" + moduleNode).append(rowsHtml[moduleNode]);
+	});
+}
+
+/* ==================================================================
+ * 6. RENDERING: linked nodes (one column per module)
+ * ================================================================== */
+function buildNodeCell(entry) {
+	if (!entry)
+		return "<td class='callsign ellipsis'><a target='_blank' href='https://qrz.com/db/'></a></td>";
+
+	var callsign = entry.callsign;
+	var suffix = "";
+	var index = callsign.indexOf(" ");
+	if (index !== -1) {
+		suffix = callsign.substring(index + 1).trim();
+		callsign = callsign.substring(0, index).trim();
+	}
+
+	var label = escapeHtml(suffix !== "" ? callsign + "-" + suffix : callsign);
+	return "<td class='callsign ellipsis'><img class='modflag' src='" + flagFor(callsign) + "'/>" +
+		"<a target='_blank' href='https://qrz.com/db/" + escapeHtml(callsign) + "'>" + label + "</a></td>";
+}
+
+function renderNodes() {
+	if (!Array.isArray(nodes))
+		nodes = [nodes];
+	if (nodes.length === 0)
+		return;
+
+	cleaned = true;
+	nodes.sort(function (a, b) {
+		var x = a.LinkedModule, y = b.LinkedModule;
+		return x < y ? -1 : x > y ? 1 : 0;
+	});
+
+	$("#tbmodules").remove();
+
+	var modules = {};
+	var biggest = 0;
+	var header = "";
+
+	nodes.forEach(function (record) {
+		if (modfilter.has(record.LinkedModule))
+			return;
+
+		if (modules[record.LinkedModule] == null) {
+			modules[record.LinkedModule] = [];
+			header += "<th class='thlename'>" + escapeHtml(getModuleFancyName(record.LinkedModule)) + "<br>" + escapeHtml(record.LinkedModule) + "</th>";
+		}
+
+		modules[record.LinkedModule].push({ callsign: record.Callsign.trim() });
+		biggest = Math.max(biggest, modules[record.LinkedModule].length);
+	});
+
+	var keys = Object.keys(modules);
+	var body = "";
+	for (var i = 0; i < biggest; i++) {
+		body += "<tr class=" + lastBgClass + ">";
+		for (var k = 0; k < keys.length; k++)
+			body += buildNodeCell(modules[keys[k]][i]);
+		body += "</tr>";
+	}
+
+	$('#insertModules').append(
+		"<table id='tbmodules' class='tgtable tables network tablefixed'><thead><tr class='headerRow'>" +
+		header + "</tr></thead><tbody id='bodymodules'>" + body + "</tbody></table>");
+}
+
+/* ==================================================================
+ * 7. INCOMING DATA
+ * ================================================================== */
+function doTraffic(data) {
+	if (data == null)
+		return;
+
+	var heard = data["HeardUsers"];
+	if (heard != null && heard["Station"] != null) {
+		if (reflector === "" && heard["Reflector"] != null)
+			reflector = heard["Reflector"];
+
+		if (!Array.isArray(heard["Station"]))
+			heard["Station"] = [heard["Station"]];
+
+		traffic = keepFirstRecordForEachCallsignModule(heard["Station"]);
+	}
+
+	if (version === "" && data["Version"] != null) {
+		version = data["Version"];
+		var infoLine = document.getElementById("infoLine");
+		if (infoLine)
+			infoLine.textContent = reflector + " v" + version + " - Dashboard v1.2.0";
+	}
+
+	/* events first (always, so a pending START is retried), then draw */
+	processTalker(data["talker"]);
+
+	if (traffic.length > 0)
+		renderTraffic();
+
+	if (data["LinkedNodes"] != null && data["LinkedNodes"]["Nodes"] != null)
+		nodes = data["LinkedNodes"]["Nodes"];
+
+	if (nodes)
+		renderNodes();
+}
+
+function handleMessage(e) {
+	try {
+		var auto = typeof themeSettings !== "undefined" && themeSettings == "auto";
+		if (auto)
+			adjustTheme();
+
+		var data = JSON.parse(e.data);
+
+		if (data != null) {
+			if (data.BIGEARS)
+				$("#btnlisteners").text(data.BIGEARS);
+
+			/* FIRST PACKET IS CONFIG */
+			if (data.CONFIG) {
+				if (data.CONFIG.BIGEARS)
+					$("#btnlisteners").text(data.CONFIG.BIGEARS);
+
+				if (data.CONFIG.PACKETS)
+					doTraffic(data.CONFIG.PACKETS.TRAFFIC);
+			} else {
+				if (data.TRAFFIC)
+					doTraffic(data.TRAFFIC);
+
+				if (data.STATUS)
+					log(data.STATUS);
+			}
+
+			if (auto)
+				adjustTheme();
+
+			if (doApplyConfig) {
+				doApplyConfig = false;
+				applyConfig();
+			}
+		}
+	} catch (error) {
+		log(error);
+	}
+}
+
+/* ==================================================================
+ * 8. WEBSOCKET (auto-reconnect, never touches the timer)
+ * ================================================================== */
+var RECONNECT_MIN = 2000;
+var RECONNECT_MAX = 30000;
+var reconnectDelay = RECONNECT_MIN;
+var reconnectTimer = null;
+var wsUrl = "";
+
+function scheduleReconnect() {
+	if (reconnectTimer !== null)
+		return;
+	reconnectTimer = setTimeout(function () {
+		reconnectTimer = null;
+		openSocket();
+	}, reconnectDelay);
+	reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
+}
+
+function openSocket() {
+	var Impl = window.WebSocket || window.MozWebSocket;
+	if (!Impl) {
+		log("Browser does not support WebSocket!");
+		return;
+	}
+
+	var ws;
+	try {
+		ws = new Impl(wsUrl);
+	} catch (error) {
+		log(error);
+		scheduleReconnect();
+		return;
+	}
+	socket = ws;
+
+	ws.onopen = function () {
+		log("Connected to " + wsUrl);
+		sock = ws;
+		reconnectDelay = RECONNECT_MIN;
+	};
+
+	ws.onmessage = handleMessage;
+
+	ws.onerror = function (error) {
+		log('WebSocket error: ' + error);
+	};
+
+	ws.onclose = function (e) {
+		log("Connection closed (wasClean = " + e.wasClean + ", code = " + e.code + ", reason = '" + e.reason + "')");
+		sock = null;
+		/* nobody can be timed while we are blind: close open transmissions */
+		stopAllTalks();
+		pendingStart = null;
+		lastEventSig = "";
+		scheduleReconnect();
+	};
+}
+
+/* ==================================================================
+ * 9. PAGE LIFECYCLE
+ * ================================================================== */
+$(document).ready(function () {
+	/* document ready occurs before window.onload */
+	if (typeof getConfigFromLocalStorage === "function") {
+		getConfigFromLocalStorage();
+
+		if (document.documentElement.className != settings[0].config.theme)
+			document.documentElement.className = settings[0].config.theme;
+	}
+
+	document.cookie = "SameSite=None; Secure";
+
+	initMenubar();
+});
+
+/* ------------------------------------------------------------------
+ * Startup
+ * ------------------------------------------------------------------ */
+var BANNER_COOLDOWN_SEC = 3600;   /* don't show the banner again within this time */
+
+function showMainUi() {
+	$("#menubar, #siteHeader, #freqstatsdiv").show();
+}
+
+/* banner is shown only if a delay is configured and it wasn't shown recently */
+function shouldShowBanner() {
+	if (!(bannerDelay > 0))                      /* also covers NaN and 0 */
+		return false;
+
+	var last = (typeof settings !== "undefined" && settings[0] && settings[0].config)
+		? Number(settings[0].config.last)
+		: NaN;
+	if (isNaN(last))
+		return true;                             /* never shown before */
+
+	return (Date.now() - last) / 1000 >= BANNER_COOLDOWN_SEC;
+}
+
+function showBannerThenUi() {
+	$("#sitelogo").show();
+
+	setTimeout(function () {
+		$("#sitelogo").hide();
+		showMainUi();
+
+		/* reset the banner cooldown */
+		if (typeof saveSettings === "function")
+			saveSettings();
+	}, bannerDelay);
+}
+
+function initModuleMarkers() {
+	modorder.forEach(function (moduleNode) {
+		if (moduleNode !== "")
+			$("#insertPoint").append($("<div id='mod" + moduleNode + "marker'></div>"));
+	});
+	$("#insertPoint").toggle(!hideAllMod);
+}
+
+function startTimer() {
+	if (ticker === null)
+		ticker = setInterval(tickAll, 1000);
+}
+
+function buildWsUrl() {
+	var scheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+	return scheme + window.location.hostname + ":__SOCKET_SERVER_PORT__?page=dashboard";
+}
+
+window.onload = function () {
+	if (isNaN(displayLines))
+		displayLines = 10;
+
+	loadTalkStats();
+
+	if (shouldShowBanner())
+		showBannerThenUi();
+	else
+		showMainUi();
+
+	initModuleMarkers();
+	startTimer();
+
+	wsUrl = buildWsUrl();
+	setTimeout(openSocket, 250);
+};
+
 </script>
+</body>
 
 </html>

@@ -19,13 +19,13 @@
  *
  *  Copyright(c) 2023-25 F4JDN - Jean-Michel Cohen
  *  
-*/
+ */
 
 import fs from "fs"
 import * as https from 'https'
 import * as http from 'http'
 
-import { logger } from "./monitor.js"
+import { logger } from "./logger.js"
 import * as globals from "./globals.js"
 
 /**

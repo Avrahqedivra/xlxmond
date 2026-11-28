@@ -196,3 +196,7 @@ sitelogo {
     -ms-transform: translateX(calc(-1 * var(--color-sitelogo-posX)));
     transform: translateX(calc(-1 * var(--color-sitelogo-posX)));
 }
+
+th {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.018)), #0c1317 !important;
+}

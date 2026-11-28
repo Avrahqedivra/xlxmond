@@ -23,7 +23,7 @@
 
 import { Crc16 } from './crc16.js'
 import * as config from './config.js'
-import { __version__ } from './monitor.js'
+import { __version__ } from './constants.js'
 import { abort } from 'process'
 
 /** Shared CRC16 helper, same instance the monitor uses for auth. */

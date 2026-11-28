@@ -19,7 +19,7 @@
  *
  *  Copyright(c) 2023-25 F4JDN - Jean-Michel Cohen
  *  
-*/
+ */
 
 import fs from 'fs'
 
@@ -35,3 +35,5 @@ export class Logger {
     console.log(str)
   }
 }
+
+export const logger = new Logger()
